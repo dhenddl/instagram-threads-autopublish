@@ -1,0 +1,32 @@
+{
+  "publishDate": "2026-08-06",
+  "caption": "📌 성과 숫자를 스크린샷으로 관리하는 분이 있다면 이 글 공유해주세요.\n\n3주 동안 인스타·스레드 인사이트를 폰으로 캡처해서 위키에 손으로 옮겼습니다. 그런데 제 기록에 없는 성장이 적혀 있었어요.\n\n조회수 15인 스레드를 96으로 적어뒀더라고요. 6배 자랐다고 쓰고 \"관찰을 너무 일찍 끊었다\"는 교훈까지 정리했는데, 그 스크린샷은 다른 글이었습니다.\n\n원인은 단순했어요. 인사이트 화면엔 캡션도 썸네일도 안 보여서 어느 게시물의 숫자인지 구분이 안 됩니다. 비슷한 화면 몇 장 쌓이면 헷깔리는 게 당연했어요.\n\n반대 방향 실수도 있었습니다. 2시간 만에 보고 \"천장 56\"이라 판정한 릴스가 나중에 178까지 갔어요. 한쪽은 없는 걸 만들고, 한쪽은 있는 걸 놓쳤습니다.\n\n그래서 Graph API 읽기 전용으로 99줄 짜서 명령 한 줄로 전체를 받아옵니다. 권한을 새로 받을 필요도 없었어요 — 이미 있는 걸 안 쓰고 있었던 거예요.\n\n결과적으로 제가 세운 교훈이 틀렸고 원래 판단이 맞았습니다. 이제 스크린샷과 API 숫자가 다르면 API를 믿기로 정했어요.\n\n#인스타그램인사이트 #GraphAPI #개발자부업 #무인수익실험 #AI자동화",
+  "threadsText": "제 성과 기록에 없는 성장이 적혀 있었습니다.\n\n3주 동안 인사이트를 폰으로 캡처해서 손으로 옮겼는데, 조회수 15인 스레드를 96으로 적어놨더라고요. 6배 자랐다고 쓰고 교훈까지 정리했는데, 그 스크린샷은 다른 글이었어요.\n\n인사이트 화면엔 캡션도 썸네일도 없어서 어느 게시물인지 구분이 안 됩니다.\n\n반대 실수도 있었어요. 2시간 만에 보고 \"천장 56\"이라 판정한 릴스가 나중에 178까지 갔어요.\n\n그래서 Graph API 읽기 전용으로 99줄 짜서 명령 한 줄로 받아옵니다.\n\n성과 숫자, 어떻게 기록하고 계세요?\n\n그 코드가 오늘 아침에 또 하나 잡았어요 — 답글에 붙였습니다.",
+  "threadsTextOnly": true,
+  "threadsReplies": [
+    "오늘 아침에 잡힌 건 이거예요.\n\n제 릴스 중 도달이 제일 높은 게 178인데, 그 이유를 \"건너뛰기 비율이 27.9%로 제일 낮았다\"로 3주째 적어뒀어요.\n\nAPI로 뽑아보니 70.6이었습니다. 최저가 아니라 그냥 평균이었어요.\n\n같은 지표를 다른 릴스에서 대조해보니 69.2 대 69.2로 소수점까지 맞았어요. 그래서 API가 맞고 제 기록이 틀린 겁니다.",
+    "이게 왜 아픈지는 본편보다 여기 있어요.\n\n저는 그 27.9%로 \"완주율이 좋으면 도달이 오른다\"는 설명을 만들어뒀거든요. 숫자가 틀렸으니 설명도 같이 무너집니다.\n\n지금은 원인 미특정으로 되돌렸어요.\n\n폰으로 옮겨 적는 게 위험한 건 숫자 하나가 아니라, 그 숫자로 세운 해석까지 같이 가져간다는 거예요."
+  ],
+  "images": [
+    "https://raw.githubusercontent.com/dhenddl/dhenddl-assets/main/posts/insights-api-b6f0809f/slide-01.jpg",
+    "https://raw.githubusercontent.com/dhenddl/dhenddl-assets/main/posts/insights-api-b6f0809f/slide-02.jpg",
+    "https://raw.githubusercontent.com/dhenddl/dhenddl-assets/main/posts/insights-api-b6f0809f/slide-03.jpg",
+    "https://raw.githubusercontent.com/dhenddl/dhenddl-assets/main/posts/insights-api-b6f0809f/slide-04.jpg",
+    "https://raw.githubusercontent.com/dhenddl/dhenddl-assets/main/posts/insights-api-b6f0809f/slide-05.jpg",
+    "https://raw.githubusercontent.com/dhenddl/dhenddl-assets/main/posts/insights-api-b6f0809f/slide-06.jpg",
+    "https://raw.githubusercontent.com/dhenddl/dhenddl-assets/main/posts/insights-api-b6f0809f/slide-07.jpg"
+  ],
+  "targets": [
+    "instagram",
+    "threads"
+  ],
+  "alts": [
+    "무인 수익 실험 · 구축기 4 · 카드뉴스 1/7 — 제 성과 기록에 없는 성장이 적혀 있었습니다 — 찾아낸 건 제가 아니라, 제가 쓴 99줄짜리 코드였어요.",
+    "무인 수익 실험 · 구축기 4 · 카드뉴스 2/7 — 원래 방식 — 폰으로 캡처해서 손으로 옮겼어요",
+    "무인 수익 실험 · 구축기 4 · 카드뉴스 3/7 — 사고 ① 없는 성장을 만들었어요 — 15인 조회수를 96으로 적었어요",
+    "무인 수익 실험 · 구축기 4 · 카드뉴스 4/7 — 원인 — 인사이트 화면엔 제목이 없어요",
+    "무인 수익 실험 · 구축기 4 · 카드뉴스 5/7 — 사고 ② 있는 성장을 놓쳤어요 — 2시간 만에 보고 \"천장 56\"이라 판정했어요",
+    "무인 수익 실험 · 구축기 4 · 카드뉴스 6/7 — 지금은 이렇게 해요 — 명령 한 줄로 전체를 한 번에 받아옵니다",
+    "무인 수익 실험 · 구축기 4 · 카드뉴스 7/7 — 코드가 제 기록을 정정해줬습니다. 제가 세운 교훈이 틀렸고 원래 판단이 맞았어요. 이제 스크린샷과 숫자가 다르면 API를 믿습니다. 숫자를 손으로 옮기는 친구가 있다면 공유해주세요."
+  ]
+}
