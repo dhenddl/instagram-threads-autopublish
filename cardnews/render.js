@@ -4,6 +4,8 @@ import { chromium } from "playwright";
 import { readFileSync, mkdirSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadTheme, rgba } from "./palette.mjs";
+import { inspect, report } from "./inspect.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const dataPath = resolve(__dirname, process.argv[2] ?? "slides.json");
@@ -15,21 +17,28 @@ const W = 1080, H = 1350;
 const esc = (s) => s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 const ml = (s) => esc(s).replaceAll("\n", "<br>");
 
+// 색·폰트는 palette.mjs가 단일 출처다. slides.json의 meta.palette / meta.fonts로
+// 덮어쓸 수 있고, 안 건드리면 기존 발행분과 같은 색이 나온다.
+// ★ 같은 소재의 릴스도 같은 팔레트를 써야 한다 → make-termcast.mjs --palette-from
+const { palette: pal, fonts } = loadTheme(meta);
+
 const css = `
   * { margin: 0; padding: 0; box-sizing: border-box; }
   :root {
-    --bg: #0d1117; --panel: #161b22; --line: #30363d;
-    --text: #e6edf3; --dim: #9aa4b2; --accent: #3fb950; --accent-dim: #238636;
+    --bg: ${pal.bg}; --panel: ${pal.panel}; --line: ${pal.line};
+    --text: ${pal.text}; --dim: ${pal.dim}; --accent: ${pal.accent}; --accent-dim: ${pal.accentDim};
+    --on-accent: ${pal.onAccent}; --danger: ${pal.danger};
   }
-  body { background: #000; font-family: 'Pretendard Variable', Pretendard, 'Noto Sans KR', 'Malgun Gothic', sans-serif; }
-  .mono { font-family: 'Cascadia Code', 'D2Coding', Consolas, monospace; }
+  /* body 배경은 작업 화면 바탕이다 — 스크린샷은 .slide 요소만 잘라내므로 결과에 안 들어간다 */
+  body { background: #000; font-family: ${fonts.sans}; }
+  .mono { font-family: ${fonts.mono}; }
   .slide {
     width: ${W}px; height: ${H}px; background: var(--bg); color: var(--text);
     position: relative; overflow: hidden; display: flex; flex-direction: column;
   }
   .glow {
     position: absolute; width: 900px; height: 900px; border-radius: 50%;
-    background: radial-gradient(circle, rgba(63,185,80,.13) 0%, transparent 62%);
+    background: radial-gradient(circle, ${rgba(pal.accent, 0.13)} 0%, transparent 62%);
     top: -320px; right: -280px; pointer-events: none;
   }
   .chrome {
@@ -47,6 +56,11 @@ const css = `
     border: 2px solid var(--accent-dim); border-radius: 999px; padding: 14px 30px;
     margin-bottom: 56px; letter-spacing: 1px;
   }
+  /* ★ 고아 줄 방지 (2026-08-10). 마지막 줄에 글자 하나만 떨어지는 걸 브라우저가
+     줄 나눔을 다시 잡아 막는다. 세로로 길쭉한 카드에서 특히 눈에 띄던 문제다.
+     자기검사로 발행 대기분 22세트를 재보니 고아가 14건 있었는데 이 한 줄로 0이 됐다.
+     ⚠️ 원고는 한 글자도 안 바꾼다 — 줄이 어디서 끊기는지만 달라진다. */
+  h1, h2, .sub, .body, .note, .cn { text-wrap: pretty; }
   h1 { font-size: 96px; line-height: 1.22; font-weight: 800; letter-spacing: -1px; }
   h2 { font-size: 76px; line-height: 1.26; font-weight: 800; letter-spacing: -0.5px; }
   .sub { margin-top: 44px; font-size: 40px; color: var(--dim); line-height: 1.5; }
@@ -67,7 +81,7 @@ const css = `
   .stat .arrow { font-size: 44px; color: var(--dim); }
   .stat .target { font-size: 72px; font-weight: 800; color: var(--accent); }
   .follow {
-    margin-top: 56px; align-self: flex-start; background: var(--accent); color: #04260f;
+    margin-top: 56px; align-self: flex-start; background: var(--accent); color: var(--on-accent);
     font-size: 38px; font-weight: 800; padding: 30px 52px; border-radius: 16px;
   }
   .handle { margin-top: 40px; font-size: 30px; color: var(--dim); }
@@ -82,30 +96,32 @@ const css = `
   .chart svg { width: 100%; height: 200px; display: block; }
   .chart .cx { display: flex; justify-content: space-between; margin-top: 10px; font-size: 22px; color: var(--dim); }
   .chart .cn { margin-top: 16px; font-size: 27px; line-height: 1.45; color: var(--text); }
-  .chart.bad .cv { color: #f85149; }
+  .chart.bad .cv { color: var(--danger); }
   .chart.good .cv { color: var(--accent); }
 
   /* --- table: 실측 비교표 (2026-08-05 신설) --- */
   .tbl { margin-top: 40px; border: 1px solid var(--line); border-radius: 18px; overflow: hidden; }
   .tr { display: flex; align-items: center; gap: 16px; padding: 22px 30px; border-top: 1px solid var(--line); font-size: 33px; }
   .tr:first-child { border-top: 0; background: var(--panel); color: var(--dim); font-size: 27px; }
-  .tr.hi { background: rgba(63,185,80,.10); }
-  .tr.lo { background: rgba(248,81,73,.08); }
+  .tr.hi { background: ${rgba(pal.accent, 0.1)}; }
+  .tr.lo { background: ${rgba(pal.danger, 0.08)}; }
   .tr .c1 { flex: 1.45; } .tr .c2 { flex: 1; text-align: right; color: var(--dim); }
   .tr .c3 { flex: .85; text-align: right; font-weight: 800; }
   .tr.hi .c3 { color: var(--accent); }
-  .tr.lo .c3 { color: #f85149; }
+  .tr.lo .c3 { color: var(--danger); }
   .note { margin-top: 34px; font-size: 30px; line-height: 1.5; color: var(--dim); }
 `;
 
 // 리텐션 곡선 SVG. points = [[시간%, 시청자%], ...]
 // 렌더 실폭(약 380px)과 viewBox를 맞춰 preserveAspectRatio=none의 선 굵기 왜곡을 없앤다.
+// ⚠️ 색을 CSS 변수로 안 넘기고 값으로 박는다 — SVG 프레젠테이션 속성의 var()는
+//    엔진마다 처리가 갈려서, 팔레트를 바꿨을 때 선만 안 따라올 수 있다.
 const curveSvg = (points, color) => {
   const CW = 380, CH = 200, p = 4;
   const xy = ([x, y]) => `${(x / 100) * (CW - p * 2) + p},${CH - p - (y / 100) * (CH - p * 2)}`;
   const grid = (yPct) => {
     const y = CH - p - (yPct / 100) * (CH - p * 2);
-    return `<line x1="0" y1="${y}" x2="${CW}" y2="${y}" stroke="#30363d" stroke-width="1" stroke-dasharray="5 7"/>`;
+    return `<line x1="0" y1="${y}" x2="${CW}" y2="${y}" stroke="${pal.line}" stroke-width="1" stroke-dasharray="5 7"/>`;
   };
   return `<svg viewBox="0 0 ${CW} ${CH}" preserveAspectRatio="none">
       ${grid(100)}${grid(50)}${grid(0)}
@@ -116,9 +132,9 @@ const curveSvg = (points, color) => {
 
 const chrome = (i, n) => `
   <div class="chrome">
-    <span class="dot" style="background:#ff5f56"></span>
-    <span class="dot" style="background:#ffbd2e"></span>
-    <span class="dot" style="background:#27c93f"></span>
+    <span class="dot" style="background:${pal.dots[0]}"></span>
+    <span class="dot" style="background:${pal.dots[1]}"></span>
+    <span class="dot" style="background:${pal.dots[2]}"></span>
     <span class="t mono">${esc(meta.terminalTitle)}</span>
     <span class="pg mono">${String(i + 1).padStart(2, "0")} / ${String(n).padStart(2, "0")}</span>
   </div>`;
@@ -159,7 +175,7 @@ function renderSlide(s, i, n) {
           <div class="chart ${esc(c.tone ?? "")}">
             <div class="cl mono">${esc(c.label)}</div>
             <div class="cv mono">${esc(c.value)}</div>
-            ${curveSvg(c.points, c.tone === "good" ? "#3fb950" : c.tone === "bad" ? "#f85149" : "#58a6ff")}
+            ${curveSvg(c.points, c.tone === "good" ? pal.accent : c.tone === "bad" ? pal.danger : pal.info)}
             <div class="cx mono"><span>시작</span><span>끝</span></div>
             <div class="cn">${ml(c.note)}</div>
           </div>`).join("")}
@@ -207,6 +223,16 @@ const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
 await page.setContent(html, { waitUntil: "networkidle" });
 
+// ── 자기검사 ──────────────────────────────────────────────────────────
+// 스크린샷 **전에** 잰다(레이아웃은 이미 확정됐고, 결과를 먼저 봐야 한다).
+// 문제가 있어도 이미지는 그대로 저장한다 — 눈으로 봐야 고칠 수 있으니까.
+// 안전 여백 24px. 설계값(`.inner` padding-bottom)은 72px이지만 그걸 기준으로 잡으면
+// CTA 카드가 전부 걸린다 — 발행분 22세트를 재보니 **가장 빡빡한 게 38px**이었고 멀쩡했다.
+// 24px = "지금까지 한 번도 없던 수준" → 진짜 잘리기 직전이라는 신호.
+const inspection = await inspect(page, slides.map((_, i) => `#s${i}`), { safeBottom: 24 });
+const renderErrors = report(inspection, (_, i) =>
+  `${String(i + 1).padStart(2, "0")}번 (${slides[i].type ?? "content"}) ${slides[i].heading ?? slides[i].title ?? ""}`.trim());
+
 for (let i = 0; i < slides.length; i++) {
   const base = `slide-${String(i + 1).padStart(2, "0")}`;
   const png = resolve(outDir, `${base}.png`);
@@ -218,3 +244,10 @@ for (let i = 0; i < slides.length; i++) {
 }
 await browser.close();
 console.log(`done. ${slides.length} slides -> ${outDir}`);
+
+// ⚠️ 마지막에 죽인다 — 이미지는 이미 저장됐다. 호출한 쪽(빌드 스크립트)이
+//    잘린 카드를 모르고 호스팅·발행까지 밀고 가는 걸 막는 게 목적이다.
+if (renderErrors) {
+  console.error(`\n❌ 렌더 오류 ${renderErrors}건 — 발행 전에 고칠 것`);
+  process.exitCode = 1;
+}

@@ -12,8 +12,14 @@
 //     "threadsReplies": ["답글1", "답글2"],                      // 선택. 셀프 답글 체인(부모→답글1→답글2 연쇄)
 //     "images": ["https://.../01.jpg", "https://.../02.jpg"],   // 공개 URL, JPEG만
 //     "alts": ["1번 대체텍스트", "2번 대체텍스트", ...],          // 선택. 이미지와 같은 순서. SEO+접근성
+//     "isAiGenerated": true,                                    // 선택. 인스타 캐러셀에 AI 라벨을 켠다(기본 false)
 //     "targets": ["instagram", "threads"]
 //   }
+//
+// ⚠️ isAiGenerated는 **인스타 캐러셀 전용**이다.
+//   · 릴스에는 적용되지 않는다 — 우리 릴스는 API 발행이 아니라 **폰 앱 수동 업로드**이고,
+//     릴스 라벨은 앱의 `Add AI label` 토글로 켠다. 켠 결과는 `check-ai-label.mjs`로 검증한다.
+//   · 스레드는 미적용 — 공식 문서가 확인된 건 Instagram 쪽뿐이라 검증 없이 넣지 않는다.
 //
 // 전제: .env에 IG_ACCESS_TOKEN / THREADS_ACCESS_TOKEN (장기 토큰).
 // ⚠️ 첫 실행 전 미검증 스켈레톤 — 토큰 발급 후 dry-run으로 반드시 먼저 확인할 것.
@@ -82,27 +88,46 @@ async function waitReady(base, containerId, token, label, field = 'status_code')
 }
 
 // ---------- 멱등성: "오류 응답 ≠ 미발행" 판별 ----------
-// ⚠️ 이 계정에서 두 번 발생했다 (2026-07-22 팁2, 2026-08-04 ai-label):
-//    media_publish가 오류를 반환했는데 서버 쪽 쓰기는 커밋돼 실제로는 게시됨.
+// ⚠️ 이건 사고가 아니라 이 계정 캐러셀 발행의 **정상 상태**다.
+//    media_publish가 오류를 반환했는데 서버 쪽 쓰기는 커밋돼 실제로는 게시된다.
+//    로그 전수 대조(2026-08-07): **캐러셀 발행 11건 중 9건이 code 4**였다.
+//    깨끗했던 건 07-21(첫 발행)과 08-03 둘뿐이고, 08-03이 왜 안 났는지는 설명 못 한다.
 //    07-22엔 "사람이 계정에서 확인할 것"이라는 주석만 남겼고 08-04에 똑같이 재발했다 —
 //    사람 절차로는 못 막으니 코드로 확인한다. 확인 없이 재발행하면 같은 글이 두 번 올라간다.
 const publishKey = (s) => (s ?? '').replace(/\s+/g, '').slice(0, 40);
+
+// 이 스크립트가 인스타에 만드는 건 **항상 피드 캐러셀**(media_product_type=FEED)이다.
+// 릴스는 트렌드 오디오 때문에 폰 앱 수동 업로드라 여기서 만들지 않는다.
+// ⚠️ 2026-08-07 사고: 같은 캡션의 **릴스가 7분 먼저** 올라가자 가드가 그걸 "이미 올라간 캐러셀"로
+//    보고 캐러셀 발행을 막았다(3형식 전략상 캡션 앞 40자는 세 표면이 동일하다).
+//    더 위험한 쪽은 반대 경로였다 — media_publish가 진짜로 실패했을 때 아래 함수가 릴스를 집으면
+//    "거짓 실패, 이미 게시됨 ⛔재발행 금지"로 판정해 **캐러셀이 영영 안 올라가고 exit 0**이 된다.
+//    (07-22·08-04·08-05·08-06·08-07 전부 이 함수가 판정을 맡았다. 08-07엔 캐러셀이 릴스보다
+//     최신이라 우연히 맞는 걸 집었을 뿐이다.)
+const OUR_IG_SURFACE = 'FEED';
 
 // 반환: 게시물 객체(=게시됨) | null(=미발행 확인) | undefined(=확인 자체 실패)
 // windowMs — 오류 후 판정은 짧게(직후 몇 초), 발행 전 중복 검사는 길게(하루)
 async function findRecentPost(target, userId, token, text, windowMs = 15 * 60 * 1000) {
   const key = publishKey(text);
   if (!key) return undefined;                       // 비교 기준이 없으면 판정 불가
-  const [base, edge, field] = target === 'instagram'
-    ? [IG_BASE, 'media', 'caption']
-    : [TH_BASE, 'threads', 'text'];
+  const [base, edge, field, fields] = target === 'instagram'
+    ? [IG_BASE, 'media', 'caption', 'id,timestamp,caption,media_product_type']
+    : [TH_BASE, 'threads', 'text', 'id,timestamp,text'];
   try {
     // 재시도 없이 1회만 — 이미 한도에 걸린 상태일 수 있어 추가 호출을 최소화
-    const r = await api('GET', `${base}/${userId}/${edge}`, { fields: `id,timestamp,${field}`, limit: '10', access_token: token }, 0);
+    const r = await api('GET', `${base}/${userId}/${edge}`, { fields, limit: '10', access_token: token }, 0);
     const cutoff = Date.now() - windowMs;
     for (const p of r.data ?? []) {
       if (new Date(p.timestamp).getTime() < cutoff) continue;
-      if (publishKey(p[field]).startsWith(key)) return p;
+      if (!publishKey(p[field]).startsWith(key)) continue;
+      // ⚠️ 표면이 **다른 것으로 확인될 때만** 거른다. 필드가 비면 거르지 않고 그대로 비교한다 —
+      //    못 걸러서 중복 게시하는 쪽이 과잉 차단보다 나쁘다(위험 방향으로 열지 않는다).
+      if (target === 'instagram' && p.media_product_type && p.media_product_type !== OUR_IG_SURFACE) {
+        console.log(`  ℹ️ 같은 캡션이지만 표면이 다름 — 건너뜀: ${p.media_product_type} id=${p.id} (${p.timestamp})`);
+        continue;
+      }
+      return p;
     }
     return null;
   } catch (e) {
@@ -123,6 +148,9 @@ async function assertNotAlreadyPublished(target, label, userId, token, text, for
   //      조용한 통과가 이 사고의 원래 형태였다.
   //   ② limit 10 — 하루 11건 이상 올리면 대상이 조회 범위를 벗어난다(현재 1~2건이라 여유).
   //   ③ 캡션 앞 40자로만 비교 — 매 편 첫 40자가 달라야 한다. 같으면 오차단, 다르면 중복 통과.
+  //      ✏️ 2026-08-08 부분 해소: **표면이 다르면 안 막는다**(findRecentPost의 media_product_type 필터).
+  //         08-07 오차단은 릴스 대 캐러셀이라 이걸로 닫혔다. 다만 **같은 표면끼리의 40자 한계는 그대로**다 —
+  //         같은 날 캐러셀 두 편의 첫 40자가 같으면 여전히 뒤엣것이 막힌다(현재 하루 1편이라 미발생).
   //   ④ 24시간 창 — 그 이후 재실행은 통과한다.
   if (dup === undefined) {
     console.error(`[${label}] ⚠️ 중복 검사를 수행하지 못했습니다 — 중복 게시 가능성을 배제하지 못한 상태로 발행을 진행합니다.`);
@@ -156,7 +184,7 @@ async function publishOrVerify({ target, label, userId, token, text, doPublish }
 }
 
 // ---------- Instagram 캐러셀 ----------
-async function publishInstagram({ images, caption, alts }, token, dryRun, force) {
+async function publishInstagram({ images, caption, alts, isAiGenerated }, token, dryRun, force) {
   const { id: userId, username } = await api('GET', `${IG_BASE}/me`, { fields: 'id,username', access_token: token });
   console.log(`[IG] 계정 확인: @${username} (${userId})`);
 
@@ -178,13 +206,21 @@ async function publishInstagram({ images, caption, alts }, token, dryRun, force)
   }
   // 자식 컨테이너가 전부 FINISHED 된 뒤에 캐러셀로 묶는다 (미완료 자식 참조 방지)
   for (const [i, id] of children.entries()) await waitReady(IG_BASE, id, token, `IG 아이템 ${i + 1}`, 'status_code');
-  const { id: carouselId } = await api('POST', `${IG_BASE}/${userId}/media`, {
+  const parentParams = {
     media_type: 'CAROUSEL', children: children.join(','), caption, access_token: token,
-  });
+  };
+  // ⚠️ 라벨은 **부모 컨테이너에만** 붙인다. 공식 문서가 명시: "Setting this parameter on
+  // carousel children will result in an error." 위 자식 루프에는 절대 넣지 말 것.
+  if (isAiGenerated) parentParams.is_ai_generated = 'true';
+  const { id: carouselId } = await api('POST', `${IG_BASE}/${userId}/media`, parentParams);
   await waitReady(IG_BASE, carouselId, token, 'IG');
-  console.log(`[IG] 캐러셀 컨테이너 준비 완료: ${carouselId}`);
+  console.log(`[IG] 캐러셀 컨테이너 준비 완료: ${carouselId}${isAiGenerated ? ' (AI 라벨 요청함)' : ''}`);
 
-  if (dryRun) { console.log('[IG] --dry-run: 발행 직전 정지. 검수 후 재실행하세요.'); return { carouselId, published: false }; }
+  if (dryRun) {
+    if (isAiGenerated) console.log('[IG] --dry-run: AI 라벨을 부모 컨테이너에만 설정함 — 실제 반영 여부는 발행 후 GET으로만 확인 가능');
+    console.log('[IG] --dry-run: 발행 직전 정지. 검수 후 재실행하세요.');
+    return { carouselId, published: false };
+  }
   const r = await publishOrVerify({
     target: 'instagram', label: 'IG', userId, token, text: caption,
     doPublish: async () => {
@@ -193,6 +229,20 @@ async function publishInstagram({ images, caption, alts }, token, dryRun, force)
       return { id };
     },
   });
+
+  // 라벨을 켰다면 실물을 다시 읽는다 — 요청에 파라미터를 넣은 것과 라벨이 실제로 붙은 것은 다르다.
+  // (2026-08-07에만 "성공 응답 ≠ 원하는 상태"가 여덟 번 재현됐다.)
+  // ⚠️ 검증 실패로 예외를 던지지 않는다 — 이 시점엔 이미 발행이 끝났고, 여기서 터지면
+  //    호출부가 발행 실패로 오인해 재발행을 권하게 된다(07-22·08-04 중복 게시 사고의 형태).
+  if (isAiGenerated && r.id) {
+    try {
+      const v = await api('GET', `${IG_BASE}/${r.id}`, { fields: 'is_ai_generated', access_token: token });
+      if (v.is_ai_generated === true) console.log(`[IG] ✅ AI 라벨 실물 확인: is_ai_generated=true`);
+      else console.error(`[IG] ⚠️ AI 라벨 요청했으나 실물은 is_ai_generated=${JSON.stringify(v.is_ai_generated)} — 앱에서 직접 확인할 것`);
+    } catch (e) {
+      console.error(`[IG] ⚠️ AI 라벨 검증 조회 실패(발행 자체는 완료됨): ${e.message}`);
+    }
+  }
   return { mediaId: r.id, published: true, falseAlarm: r.falseAlarm };
 }
 
@@ -200,8 +250,31 @@ async function publishInstagram({ images, caption, alts }, token, dryRun, force)
 // 부모→답글1→답글2로 **연쇄**시킨다(전부 부모에 붙이면 형제 나열이 되고, 연쇄하면 시리즈로 렌더링됨).
 // 발행 직후 즉시 붙이는 게 중요하다 — 피드 노출이 시작될 때 이미 답글이 있어야 첫 시청자부터 유입된다.
 // (2026-07-30·07-31 셀프 답글은 4분·11분 늦었고 통과율 2.8%로 끝났다 → topics/스레드 답글 레버)
+// ⚠️ 2026-08-09 사고: 본편은 나갔는데 답글 2개가 통째로 실패했다.
+//   `code 24 / subcode 4279009` — "ID가 …인 미디어를 찾을 수 없습니다".
+//   그런데 waitReady로 **FINISHED를 확인한 직후**의 컨테이너였고, 29분 뒤 조회해도 FINISHED로 살아 있었다.
+//   ★ 재시도가 안 된 이유: api()의 재시도 조건이 `err.is_transient`뿐인데 메타가 이걸 **false**로 줬다.
+//   그런데 29분 뒤 같은 절차가 **재시도 없이 한 번에** 성공했다 → **일시적 오류였는데 영구로 자기신고한 것**이다.
+//   → 이 단계만 `is_transient`와 무관하게 재시도한다. 08-05·06·07·08은 전부 성공했고 09만 났다(간헐성).
+//
+// ⛔ 단 블라인드 재시도는 금지다 — publish 응답만 잃고 실제로는 붙었을 수 있고, 그러면 답글이 중복된다.
+//   (07-22·08-04·08-05·08-06·08-07 캐러셀에서 반복 확인된 "오류 응답 ≠ 미발행" 패턴이 여기도 적용된다.)
+//   그래서 **재시도 전에 부모 대화를 조회해 실물부터 본다.**
+async function findPublishedReply(rootId, token, text) {
+  const key = publishKey(text);
+  if (!key) return undefined;
+  try {
+    const r = await api('GET', `${TH_BASE}/${rootId}/conversation`, { fields: 'id,text', access_token: token }, 0);
+    return (r.data ?? []).find((p) => publishKey(p.text).startsWith(key))?.id ?? null;
+  } catch (e) {
+    console.error(`  ⚠️ 답글 실물 확인 실패: ${e.message}`);
+    return undefined;                               // 확인 자체 실패 = 판정 불가
+  }
+}
+
 async function publishThreadReplies(userId, token, replies, parentId, dryRun) {
   const ids = [];
+  const rootId = parentId;                          // 실물 확인은 항상 본편 대화에서 한다(체인이라 prev는 바뀐다)
   let prev = parentId;
   for (const [i, text] of replies.entries()) {
     const label = `답글 ${i + 1}/${replies.length}`;
@@ -214,7 +287,26 @@ async function publishThreadReplies(userId, token, replies, parentId, dryRun) {
       media_type: 'TEXT', text, reply_to_id: prev, access_token: token,
     });
     await waitReady(TH_BASE, cid, token, `TH ${label}`, 'status');
-    const { id } = await api('POST', `${TH_BASE}/${userId}/threads_publish`, { creation_id: cid, access_token: token });
+
+    let id = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        // retries=0 — 재시도는 이 루프가 통제한다(api() 내부 재시도와 이중으로 겹치지 않게)
+        ({ id } = await api('POST', `${TH_BASE}/${userId}/threads_publish`, { creation_id: cid, access_token: token }, 0));
+        break;
+      } catch (e) {
+        const already = await findPublishedReply(rootId, token, text);
+        if (already) {                              // 오류 응답인데 실제로는 붙었다 → 재시도하면 중복
+          console.log(`[TH] ↳ ${label} ✅ 오류 응답이었으나 실물 확인됨: ${already} · 재시도 안 함`);
+          id = already;
+          break;
+        }
+        if (already === undefined) throw e;          // 확인 실패 = 중복 위험 배제 못 함 → 재시도 금지
+        if (attempt === 3) throw e;                  // 미발행 확정인 채로 3회 소진
+        console.log(`  ↻ ${label} publish 재시도 ${attempt}/2 (4초 대기) — 실물 미발행 확인됨: ${e.message.slice(0, 90)}`);
+        await sleep(4000);
+      }
+    }
     console.log(`[TH] ↳ ${label} 발행: ${id} (reply_to=${prev})`);
     ids.push(id);
     prev = id;
@@ -298,6 +390,22 @@ if (needsImages && !manifest.images?.length) throw new Error('manifest.images가
 if (manifest.images?.length > 10 && targets.includes('instagram')) throw new Error('인스타 캐러셀은 최대 10장');
 if (manifest.images?.some((u) => !/^https:\/\//.test(u))) throw new Error('이미지는 공개 https URL이어야 함');
 
+// AI 라벨 플래그 검증 — 조용히 무시되는 게 최악이다.
+// 오타(`isAIGenerated`)나 문자열 "true"를 넣으면 라벨이 안 켜지는데 에러도 안 나서,
+// 의무 대상 회차에 라벨 없이 나갈 수 있다. 실행 전에 막는다.
+// (08-07 노션 편집 API가 정확히 이 형태였다 — 오타로 매칭 실패했는데 성공을 반환했다.)
+for (const k of Object.keys(manifest)) {
+  if (k !== 'isAiGenerated' && k.toLowerCase() === 'isaigenerated') {
+    throw new Error(`manifest 키 오타: "${k}" → "isAiGenerated" (이대로면 라벨이 조용히 안 켜진다)`);
+  }
+}
+if (manifest.isAiGenerated !== undefined && typeof manifest.isAiGenerated !== 'boolean') {
+  throw new Error(`isAiGenerated는 boolean이어야 함 (받은 값: ${JSON.stringify(manifest.isAiGenerated)})`);
+}
+if (manifest.isAiGenerated === true && !targets.includes('instagram')) {
+  console.log('⚠️ isAiGenerated=true인데 instagram이 타깃에 없다 — 이 플래그는 인스타 캐러셀에만 적용된다.');
+}
+
 // 셀프 답글 체인 검증 — 발행 도중 터지면 본편만 나가고 체인이 끊기므로 실행 전에 막는다
 if (manifest.threadsReplies !== undefined) {
   if (!Array.isArray(manifest.threadsReplies)) throw new Error('threadsReplies는 배열이어야 함');
@@ -319,7 +427,10 @@ for (const target of targets) {
     let r;
     if (target === 'instagram') {
       if (!env.IG_ACCESS_TOKEN) throw new Error('.env에 IG_ACCESS_TOKEN 없음');
-      r = await publishInstagram({ images: manifest.images, caption: manifest.caption ?? '', alts: manifest.alts }, env.IG_ACCESS_TOKEN, args.dryRun, args.force);
+      r = await publishInstagram({
+        images: manifest.images, caption: manifest.caption ?? '', alts: manifest.alts,
+        isAiGenerated: manifest.isAiGenerated === true,
+      }, env.IG_ACCESS_TOKEN, args.dryRun, args.force);
     } else if (target === 'threads') {
       if (!env.THREADS_ACCESS_TOKEN) throw new Error('.env에 THREADS_ACCESS_TOKEN 없음');
       const text = manifest.threadsText ?? (manifest.caption ?? '').slice(0, 500);
