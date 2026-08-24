@@ -20,6 +20,12 @@ cardnews/*
 !cardnews/make-reels.mjs
 !cardnews/make-making-of.mjs
 !cardnews/reel-caption.mjs
+# ⚠️ 아래 둘은 render.js·make-termcast.mjs 가 import 한다 — 빠지면 클론이 실행되지 않는다.
+#    2026-08-13 커밋에서 import 가 들어갔는데 이 두 줄이 없어서 11일간 공개된 채로
+#    두 진입점이 모듈 해석 단계에서 실패하는 상태였다(2026-08-24 발견·수정).
+#    화이트리스트 방식의 대가다 — 새 모듈을 쪼갤 때마다 여기 한 줄을 같이 넣어야 한다.
+!cardnews/palette.mjs
+!cardnews/inspect.mjs
 !cardnews/package.json
 # 락파일은 넣는다 — 받는 사람이 같은 버전으로 설치돼야 "그대로 돌아간다"가 성립한다
 !cardnews/package-lock.json
