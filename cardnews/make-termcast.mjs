@@ -12,6 +12,9 @@
 //     (--run 은 명령을 실제 실행해 stdout 을 캡처 — API 를 호출하므로 재렌더 시엔 --lines 권장)
 //   ★ 색을 바꾼 시리즈면 --palette-from <같은 소재의 slides.json> 을 반드시 같이 준다.
 //     안 주면 릴스만 기본 초록으로 나가서 캐러셀과 어긋난다.
+//   ★ 렌더 전 페이싱 검산: 같은 인자에 `--trace` 만 붙인다 — 렌더하지 않고
+//     비트별 누적 시각(훅→타이핑→각 출력 줄→END_HOLD→루프)과 점검 4줄을 찍는다.
+//     기준의 출처는 second-brain/wiki/summaries/도구-조사/OpenMontage 조사 (2026-08-24 ...).md
 import { chromium } from 'playwright';
 import ffmpegPath from 'ffmpeg-static';
 import { spawnSync } from 'node:child_process';
@@ -36,6 +39,8 @@ const args = {
   // ★ 2026-08-24 신설 — 빈 골격(--skeleton). 기본 off.
   //   ⚠️ 안 주면 지금까지 나간 릴스와 **바이트 단위로 동일**하게 나온다(A/B 해시 회귀 검증 완료).
   skeleton: false,
+  // ★ 2026-08-24 신설 — 페이싱 트레이스(--trace). 렌더하지 않고 비트별 시각만 찍는다. 기본 off.
+  trace: false,
 };
 const argv = process.argv.slice(2);
 for (let i = 0; i < argv.length; i++) {
@@ -69,6 +74,7 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--voice-rate') args.voiceRate = argv[++i];             // 읽는 속도 "+20%" 등
   else if (a === '--character-height') args.charH = parseInt(argv[++i], 10);
   else if (a === '--skeleton') args.skeleton = true;          // ★ 빈 골격을 먼저 인쇄하고 채운다
+  else if (a === '--trace') args.trace = true;                // ★ 렌더 전 페이싱 검산(렌더 안 함)
 }
 if (!args.out) throw new Error('--out <mp4> 필요');
 
@@ -420,6 +426,78 @@ window.frame(0);
 // ---- 프레임 캡처 ----
 const W = 1080, H = 1920;
 const outAbs = resolve(HERE, args.out);
+
+// ---- ★★ 페이싱 트레이스 (--trace, 2026-08-24 신설) ----
+//
+// 왜: OpenMontage(스타 49.8k, AGPL)의 screen-demo 스킬이 자기 **1위 실패 모드**를 이렇게 적었다 —
+//     *"스텝이 계속 진행돼 씬 앞 40%에서 내용을 다 소진하고 남은 60%를 정지 화면으로 보낸다."*
+//     처방은 **렌더 전에** 스텝 길이를 누적해 각 비트의 영상 시각을 찍는 것이다(근거: "렌더 1분이 아깝다").
+//     우리는 총계만 찍고 있었다 — `--outro` 교체나 출력 줄 수 변화가 타임라인을 조용히 바꿔도
+//     **렌더가 끝난 뒤에야** 안다.
+//     출처: second-brain/wiki/summaries/도구-조사/OpenMontage 조사 (2026-08-24 ...).md
+//
+// ⚠️ 이 블록은 **로그 전용**이고 프레임을 만들기 전에 종료한다 — `--trace`를 안 주면
+//    지금까지 나간 릴스와 **바이트 단위로 동일**하다(A/B 해시 회귀 검증).
+if (args.trace) {
+  const NL = outLines.length;
+  const CTA_FADE = 300, FADE = 180;                 // 브라우저측 상수와 같은 값(문서화 목적)
+  const nF = Math.ceil((totalMs / 1000) * args.fps);
+  const pad = (v, n) => String(v).padStart(n);
+  const clip = (t, n = 44) => (t.length > n ? t.slice(0, n - 1) + '…' : t);
+  const row = (t, mark, text) =>
+    console.log(`  ${pad(Math.round(t), 6)}ms  ${pad((t / 1000).toFixed(2), 6)}s  ${mark} ${text}`);
+
+  console.log('\n--- 페이싱 트레이스 (렌더하지 않는다) ---');
+  if (HOOK_MS) {
+    row(0, '[훅]', clip(String(args.hookText).replace(/\\n/g, ' / ')));
+    row(HOOK_MS, '[타]', `훅 종료 · 명령어 타이핑 시작 (${args.cmd.length}자 · ${CPS}자/초)`);
+  } else {
+    row(0, '[타]', `명령어 타이핑 시작 (${args.cmd.length}자 · ${CPS}자/초)`);
+  }
+  row(HOOK_MS + typeDur, '[엔]', `타이핑 완료 → 엔터 대기 ${ENTER_PAUSE}ms`);
+  if (args.skeleton) row(0, '[골]', `빈 골격 [ ] ${NL}칸을 0초부터 인쇄`);
+  for (let i = 0; i < NL; i++) {
+    const t = START_OUT + i * LINE_STEP;
+    const last = i === NL - 1;
+    row(t, pad(i + 1, 2) + '.', clip(outLines[i]) + (last ? '   <- 마지막 줄' : ''));
+    if (last) row(t, '[CTA]', `저장·팔로우 페이드 시작 (${CTA_FADE}ms)`);
+  }
+  const outEnd = START_OUT + NL * LINE_STEP;
+  row(outEnd, '[홀]', `출력 종료 → END_HOLD ${END_HOLD}ms`);
+  if (args.loop) row(LOOP_START, '[루]', `루프 되감기 ${LOOP_MS}ms`);
+  row(totalMs, '[끝]', `총 ${(totalMs / 1000).toFixed(2)}s · ${args.fps}fps · ${nF}프레임 · ${W}x${H}`);
+
+  if (cues.length) {
+    console.log('\n--- 내레이션 자막 큐 (절대 시각) ---');
+    for (const c of cues) row(START_OUT + c.s, '[말]', clip(c.t));
+    console.log(`  (LINE_STEP ${LINE_STEP}ms = 음성 ${narrationMs}ms ÷ ${NL}줄)`);
+  }
+
+  // ---- 점검 ----
+  // 각 항목은 근거가 있는 것만 찍는다. 기준 출처를 괄호에 병기한다.
+  const lastChange = START_OUT + (NL - 1) * LINE_STEP + Math.max(FADE, CTA_FADE);
+  const frozen = Math.max(0, totalMs - lastChange);
+  const frozenPct = (frozen / totalMs) * 100;
+  const at3s = Math.max(0, Math.min(NL, Math.floor((3000 - START_OUT) / LINE_STEP) + 1));
+  const ok = (b) => (b ? 'OK  ' : 'CHK ');
+  const f1 = (v) => v.toFixed(1);
+
+  console.log('\n--- 점검 ---');
+  console.log(`  ${ok(frozenPct <= 40)} 정지 구간      ${(frozen / 1000).toFixed(2)}s (${f1(frozenPct)}%)  ` +
+              `[기준: 40% 초과면 OpenMontage가 말한 실패 모드]`);
+  console.log(`  ${ok(at3s >= 1 || HOOK_MS > 0)} 3초 시점       ` +
+              `${HOOK_MS ? '훅 종료 후 ' : ''}출력 ${at3s}줄 표시  ` +
+              `[기준: 우리 실측 — 첫 3초에 69~84% 이탈]`);
+  console.log(`  ${ok(LINE_STEP >= 500 && LINE_STEP <= 1100)} 줄 간격        ${LINE_STEP}ms  ` +
+              `[권고 500~1100ms = 페이드인 100 + hold 400~1000. 우리 11초 릴스는 의도적으로 빠름]`);
+  console.log(`  ${ok(ENTER_PAUSE >= 300)} 명령 후 hold   ${ENTER_PAUSE}ms  [권고 300ms 이상]`);
+  console.log(`  INFO 결론 도달  ${((HOOK_MS ? 0 : START_OUT + (NL - 1) * LINE_STEP) / 1000).toFixed(2)}s  ` +
+              `[훅이 있으면 0초 = 2026-08-06 설계]`);
+
+  if (narrationMs) console.log(`\n  참고: --narrate 때문에 이미 ${basename(narrationFile)}를 만들었다(트레이스 부산물).`);
+  console.log('\n  렌더는 하지 않았다. --trace 를 빼고 다시 실행하면 렌더한다.');
+  process.exit(0);
+}
 // ⚠️ 프레임 폴더 재사용은 윈도우에서 두 번 죽었다 (2026-08-05·08-06):
 //    `--keep-frames`로 남긴 PNG를 무엇이든 한 번 열어보면(뷰어·이미지 도구·탐색기 미리보기)
 //    폴더가 비어 있어도 **핸들이 남아 rmdir이 EBUSY로 실패**하고, 렌더 전체가 그 자리에서 죽는다.
@@ -442,7 +520,7 @@ if (args.skeleton) {
   console.log(`빈 골격: on — [ ] ${outLines.length}칸을 0초부터 인쇄하고 하나씩 채운다`);
   // ⚠️ 자막(=캐릭터/음성) 모드에서는 터미널이 480px로 줄고 overflow:hidden 이라
   //    화면 밖 골격이 잘린다 → "몇 개 남았는지"가 안 보여 장치의 값이 반쯤 사라진다.
-  //    지금 우리 레시피 경로(render-reels.mjs)는 --narrate 를 안 넘기므로 해당 없다.
+  //    우리 내부 러너(이 저장소에 없음)는 --narrate 를 안 넘기므로 현재 경로에선 해당 없다.
   if (cues.length) {
     console.warn('⚠️ --skeleton 과 --narrate 를 같이 썼다 — 축소된 터미널(480px)에서 먼 골격은 잘린다.');
     console.warn('   "몇 개 남았는지"가 화면에 안 보이므로 완주 장치로서의 효과는 검증되지 않았다.');
@@ -516,13 +594,15 @@ try {
 // 이 파일은 발행일 누락에 대해 이미 "경고로 두면 무시된다 → 하드 실패"를 채택했다.
 // 훅에는 같은 원칙을 적용하지 못한다 — 리드마그넷 가이드의 공개 예시가 훅 없이 돌고,
 // 그걸 깨면 독자 쪽이 막힌다. 그래서 여기서는 경고만 하고,
-// **하드 게이트는 우리 경로 두 곳에 둔다** — render-reels.mjs(렌더 전) · hook-check.mjs(렌더 후).
+// **하드 게이트는 우리 내부 러너 두 곳에 둔다**(렌더 전 거부 · 렌더 후 첫 프레임 검사).
+//    ⚠️ 그 두 스크립트는 계정 고유 레시피를 담고 있어 이 저장소에 포함하지 않았다.
+//       받아서 쓰는 쪽에서는 아래 경고를 보고 --hook-text 를 직접 넘기면 된다.
 if (!args.hookText) {
   console.error('');
   console.error('⚠️⚠️ 훅 프레임 없이 렌더했습니다 (--hook-text 미지정).');
   console.error('   훅은 2026-08-06에 "3초 이탈 69~84%"를 고치려고 신설한 장치입니다.');
   console.error('   승자 2편(08-12 도달 709 · 08-19 이탈 65.5%)은 둘 다 훅 1.75초를 갖고 있습니다.');
-  console.error('   우리 계정 릴스라면 render-reels.mjs 로 돌리세요 — 레시피에 훅이 들어 있습니다.');
+  console.error('   붙이는 법: --hook-text "결론 한 줄" --hook-ms 1750 (줄바꿈은 \\n)');
   console.error('');
 }
 
