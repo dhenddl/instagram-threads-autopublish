@@ -15,7 +15,7 @@
 import { chromium } from 'playwright';
 import ffmpegPath from 'ffmpeg-static';
 import { spawnSync } from 'node:child_process';
-import { readFileSync, mkdirSync, rmSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'node:fs';
 import { resolve, dirname, join, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tryWriteReelCaption, readPublishDate, drivePathFor } from './reel-caption.mjs';
@@ -33,6 +33,9 @@ const args = {
   character: null, narrate: null, voice: 'ko-KR-InJoonNeural', voiceGap: 250,
   voiceRate: '+0%',      // edge-tts --rate. "+20%"면 20% 빠르게 읽는다
   charH: null,           // 캐릭터 높이(px). 생략 시 자막 있으면 700, 없으면 520(README 실측값)
+  // ★ 2026-08-24 신설 — 빈 골격(--skeleton). 기본 off.
+  //   ⚠️ 안 주면 지금까지 나간 릴스와 **바이트 단위로 동일**하게 나온다(A/B 해시 회귀 검증 완료).
+  skeleton: false,
 };
 const argv = process.argv.slice(2);
 for (let i = 0; i < argv.length; i++) {
@@ -65,6 +68,7 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--voice-gap') args.voiceGap = parseInt(argv[++i], 10); // 문장 사이 무음(ms)
   else if (a === '--voice-rate') args.voiceRate = argv[++i];             // 읽는 속도 "+20%" 등
   else if (a === '--character-height') args.charH = parseInt(argv[++i], 10);
+  else if (a === '--skeleton') args.skeleton = true;          // ★ 빈 골격을 먼저 인쇄하고 채운다
 }
 if (!args.out) throw new Error('--out <mp4> 필요');
 
@@ -201,12 +205,29 @@ const charDataURI = args.character
 // 자막 모드에서는 하단을 채워야 하므로 크게(700), 자막이 없으면 README 실측값(520) 그대로.
 const charH = args.charH ?? (cues.length ? 700 : 520);
 const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+// ★★★ 빈 골격 (--skeleton, 2026-08-24 신설)
+//
+// 왜: henry_upnomad 릴스 실측(조회 30,776 · 26.9초 · 장면 전환 0건)에서 **컷 없이 27초를 끄는 장치**가
+//     이것 하나였다 — 번호 1~36을 0초부터 인쇄해두고 이름만 채운다. 첫 프레임에 "36개짜리이고
+//     지금 1개 찼다"가 전달되고, **남은 칸이 이탈을 막는다** [해석].
+//     우리 릴스는 publish.mjs 실행 로그라 이 장치가 그대로 맞는다 — 대기 항목은 [ ], 완료는 실제 출력 줄.
+//
+// ⚠️ 훅을 대체하지 않는다. 훅(0초 결론)은 2026-08-06에 3초 이탈 69~84%를 고치려고 넣은 것이고,
+//    골격은 훅이 걷힌 뒤 **증거 구간의 완주 장치**다. 순서를 바꾸면 페이오프가 다시 늦어진다.
+// ⚠️ 레이아웃은 안 움직인다 — 실제 줄(.tx)이 흐름에 남아 높이를 잡고, 골격(.sk)은 absolute다.
+//    opacity:0 엘리먼트도 자리는 차지하므로 종전에도 18줄 높이가 t=0에 이미 확보돼 있었다.
+//
+// 골격 바 길이는 실제 줄의 **터미널 셀 폭**으로 잡는다(한글=2칸). ch 단위라 폰트 크기가 바뀌어도 따라간다.
+const cellW = (s) => [...s].reduce((n, c) => n + (c.codePointAt(0) < 0x1100 ? 1 : 2), 0);
 const lineHTML = (l) => {
   let h = esc(l);
   h = h.replace(/✓/g, '<span class="ok">✓</span>');
   h = h.replace(/^(\[IG\]|\[TH\])/, '<span class="tag">$1</span>');
   if (l.startsWith('🚀') || l.startsWith('✅')) h = `<span class="success">${esc(l)}</span>`;
-  return `<div class="ln">${h}</div>`;
+  if (!args.skeleton) return `<div class="ln">${h}</div>`;
+  const w = Math.max(8, Math.min(40, cellW(l)));
+  return `<div class="ln skel"><span class="sk"><i class="sbox">[ ]</i>`
+    + `<i class="sbar" style="width:${w}ch"></i></span><span class="tx">${h}</span></div>`;
 };
 const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><style>
 * { margin:0; padding:0; box-sizing:border-box; }
@@ -230,6 +251,16 @@ body { font-family:${fonts.mono}; color:var(--text); }
 .ln .tag { color:var(--dim); }
 .ln .ok { color:var(--accent); font-weight:700; }
 .ln .success { color:var(--accent); font-weight:800; }
+/* ★ 빈 골격 (--skeleton). 골격 모드에서는 .ln 자체가 아니라 .tx / .sk 두 겹이 교차 페이드한다.
+   ⚠️ 높이를 px로 못 박지 않는다 — 일반 모드(36px/1.64)와 자막 모드(28px/1.5)를 같이 타야 한다.
+   .sk 안에 텍스트가 있어서 줄 상자 높이가 자동으로 맞고, 바는 em 기준이라 같이 줄어든다.
+   ⚠️⚠️ 이 주석에 백틱을 쓰지 말 것 — 이 CSS는 템플릿 문자열 안이다(같은 자리에서 두 번 깨졌다). */
+.ln.skel { opacity:1; position:relative; }
+.ln.skel .tx { opacity:0; }
+.sk { position:absolute; left:0; top:0; white-space:nowrap; }
+.sbox { font-style:normal; color:var(--dim); opacity:0.62; }
+.sbar { display:inline-block; height:0.4em; border-radius:6px; background:var(--line);
+  margin-left:0.8em; vertical-align:0.18em; }
 .cta { position:absolute; left:0; right:0; bottom:0; opacity:0;   /* 페이드는 위와 같은 이유로 t 계산 */
   display:flex; gap:24px; justify-content:center; align-items:center;
   padding:48px 40px 60px; background:linear-gradient(transparent, ${rgba(pal.bg, 0.9)} 30%); }
@@ -303,6 +334,7 @@ const LOOP = ${args.loop ? 'true' : 'false'}, LOOP_START = ${LOOP_START};
 const HOOK_MS = ${HOOK_MS};
 const CUES = ${JSON.stringify(cues)};
 const FADE_MS = 180, CTA_FADE_MS = 300;   // 종전 CSS transition 값 그대로
+const SKEL = ${args.skeleton ? 'true' : 'false'};
 
 // CSS ease = cubic-bezier(.25,.1,.25,1). x(진행률)를 이분법으로 풀어 y(투명도)를 낸다.
 // 근사가 아니라 같은 곡선이다 — 페이드 모양은 유지하고 시간 기준만 벽시계에서 t로 옮긴 것.
@@ -330,7 +362,21 @@ window.frame = (t) => {
   const kids = document.getElementById('out').children;
   // 줄 i는 START_OUT + i*STEP 에 등장을 시작해 FADE_MS 동안 올라온다
   for (let i = 0; i < kids.length; i++) {
-    kids[i].style.opacity = looping ? '0' : fade(t, START_OUT + i * STEP, FADE_MS);
+    const o = looping ? '0' : fade(t, START_OUT + i * STEP, FADE_MS);
+    if (SKEL) {
+      // 골격 모드: 실제 줄이 올라오고 골격이 내려간다.
+      // ⚠️ 둘을 같은 곡선으로 교차시키면 중간(각 0.5)에서 글자가 바 위에 겹쳐 한 프레임이 탁해진다
+      //    (2026-08-24 렌더 실측, 24fps에서 약 4프레임). 골격을 60% 구간에 먼저 빼서 겹침을 줄인다.
+      //    0으로 만들지 않고 더 빨리 빼는 쪽을 골랐다 — 먼저 지우면 빈 줄이 보이는 순간이 생긴다.
+      // looping 이면 o=0 이므로 골격이 1로 돌아간다 = t=0 상태 재현(루프 이어붙임 유지).
+      const tx = kids[i].querySelector('.tx');
+      const sk = kids[i].querySelector('.sk');
+      if (tx) tx.style.opacity = o;
+      if (sk) sk.style.opacity = looping ? '1'
+        : (1 - parseFloat(fade(t, START_OUT + i * STEP, FADE_MS * 0.6))).toFixed(4);
+    } else {
+      kids[i].style.opacity = o;
+    }
   }
   const cur = document.getElementById('cursor');
   cur.style.display = (!looping && shown >= NLINES) ? 'none' : 'inline-block';
@@ -392,6 +438,16 @@ mkdirSync(framesDir, { recursive: true });
 
 const nFrames = Math.ceil((totalMs / 1000) * args.fps);
 console.log(`렌더: ${outLines.length}줄 · ~${(totalMs/1000).toFixed(1)}s · ${args.fps}fps · ${nFrames}프레임 · ${W}x${H}`);
+if (args.skeleton) {
+  console.log(`빈 골격: on — [ ] ${outLines.length}칸을 0초부터 인쇄하고 하나씩 채운다`);
+  // ⚠️ 자막(=캐릭터/음성) 모드에서는 터미널이 480px로 줄고 overflow:hidden 이라
+  //    화면 밖 골격이 잘린다 → "몇 개 남았는지"가 안 보여 장치의 값이 반쯤 사라진다.
+  //    지금 우리 레시피 경로(render-reels.mjs)는 --narrate 를 안 넘기므로 해당 없다.
+  if (cues.length) {
+    console.warn('⚠️ --skeleton 과 --narrate 를 같이 썼다 — 축소된 터미널(480px)에서 먼 골격은 잘린다.');
+    console.warn('   "몇 개 남았는지"가 화면에 안 보이므로 완주 장치로서의 효과는 검증되지 않았다.');
+  }
+}
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
@@ -434,6 +490,41 @@ const r = spawnSync(ffmpegPath, ffArgs, { stdio: ['ignore', 'inherit', 'inherit'
 if (r.status !== 0) { console.error('ffmpeg 실패'); process.exit(r.status ?? 1); }
 if (!args.keepFrames) rmSync(framesDir, { recursive: true, force: true });
 console.log(`완료: ${outAbs}`);
+
+// ---- 렌더 레시피 기록 (2026-08-21 신설) ----
+//
+// ★ 근본 원인 교정. 2026-08-21에 릴스 4편의 훅 프레임이 전부 빠졌는데, 고치려고 보니
+//   원래 렌더 명령이 **어디에도 없었다** — out/ 에는 lines.txt·캡션·mp4만 남고
+//   --cmd/--title/--outro/훅은 세션 컨텍스트에만 있었다. 결국 영상 프레임을 뽑아
+//   화면에서 명령어를 읽어 복원했다. 세션이 끊기면 사라지는 자산이었다.
+// → 이제 렌더할 때마다 실제 인자를 파일로 남긴다. 재현이 추측이 아니게 된다.
+try {
+  const recipePath = join(dirname(outAbs), `${args.slug || basename(dirname(outAbs))}-render.json`);
+  writeFileSync(recipePath, JSON.stringify({
+    renderedAt: new Date().toISOString(),
+    node: process.version,
+    argv: process.argv.slice(2),
+    hook: args.hookText ? { badge: args.hookBadge, text: args.hookText, sub: args.hookSub, ms: HOOK_MS } : null,
+  }, null, 2) + '\n', 'utf8');
+  console.log(`레시피 기록: ${recipePath}`);
+} catch (e) {
+  console.error(`⚠️ 레시피 기록 실패(영상은 정상): ${e.message}`);
+}
+
+// ---- 훅 프레임 경고 (2026-08-21 신설) ----
+//
+// 이 파일은 발행일 누락에 대해 이미 "경고로 두면 무시된다 → 하드 실패"를 채택했다.
+// 훅에는 같은 원칙을 적용하지 못한다 — 리드마그넷 가이드의 공개 예시가 훅 없이 돌고,
+// 그걸 깨면 독자 쪽이 막힌다. 그래서 여기서는 경고만 하고,
+// **하드 게이트는 우리 경로 두 곳에 둔다** — render-reels.mjs(렌더 전) · hook-check.mjs(렌더 후).
+if (!args.hookText) {
+  console.error('');
+  console.error('⚠️⚠️ 훅 프레임 없이 렌더했습니다 (--hook-text 미지정).');
+  console.error('   훅은 2026-08-06에 "3초 이탈 69~84%"를 고치려고 신설한 장치입니다.');
+  console.error('   승자 2편(08-12 도달 709 · 08-19 이탈 65.5%)은 둘 다 훅 1.75초를 갖고 있습니다.');
+  console.error('   우리 계정 릴스라면 render-reels.mjs 로 돌리세요 — 레시피에 훅이 들어 있습니다.');
+  console.error('');
+}
 
 // ---- 릴스 캡션 자동 생성 (post-<슬러그>.json → out과 같은 폴더에 -caption.txt) ----
 const captionOut = tryWriteReelCaption({ slug: args.slug || basename(dirname(outAbs)), manifestOverride: args.manifest, videoOutPath: outAbs });
