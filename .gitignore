@@ -41,6 +41,11 @@ publish/*
 !publish/check-insights.mjs
 !publish/check-threads-insights.mjs
 !publish/alt.mjs
+# ⚠️ publish.mjs · host.mjs · host-mixed.mjs · check-insights.mjs ·
+#    check-threads-insights.mjs 다섯이 import 한다 — 빠지면 클론이 실행되지 않는다.
+#    2026-08-26 에 .env 파서를 이 모듈로 모았다. 위 palette/inspect 와 **정확히 같은 자리**고,
+#    그때는 진입점 2개가 11일간 깨졌는데 이번은 5개다.
+!publish/env.mjs
 !publish/refresh-tokens.mjs
 !publish/run-publish.cmd
 !publish/.env.example

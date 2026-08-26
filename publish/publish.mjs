@@ -27,32 +27,39 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { loadEnv } from './env.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const IG_BASE = 'https://graph.instagram.com/v23.0';
 const TH_BASE = 'https://graph.threads.net/v1.0';
 
 // ---------- 공통 유틸 ----------
-function loadEnv() {
-  const env = {};
-  for (const line of readFileSync(join(HERE, '.env'), 'utf8').split(/\r?\n/)) {
-    const m = line.match(/^([A-Z_]+)=(.*)$/);
-    if (m && m[2].trim()) env[m[1]] = m[2].trim();
-  }
-  return env;
-}
 
 function parseArgs() {
-  const args = { dryRun: false, target: null, manifest: null, force: false };
+  const args = { dryRun: false, target: null, manifest: null, force: false, account: null };
   const argv = process.argv.slice(2);
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--dry-run') args.dryRun = true;
     else if (argv[i] === '--target') args.target = argv[++i];
     else if (argv[i] === '--manifest') args.manifest = argv[++i];
     else if (argv[i] === '--force') args.force = true;      // 24시간 중복 검사 통과(의도한 재발행)
+    else if (argv[i] === '--account') args.account = argv[++i];   // 2계정 운용(2026-08-25 신설)
   }
-  if (!args.manifest) { console.error('사용법: node publish.mjs --manifest post.json [--dry-run] [--target instagram|threads] [--force]'); process.exit(1); }
+  if (!args.manifest) { console.error('사용법: node publish.mjs --manifest post.json [--dry-run] [--target instagram|threads] [--force] [--account 1|2]'); process.exit(1); }
   return args;
+}
+
+// ── 2계정 운용 (2026-08-25 신설) ─────────────────────────────
+// 계정은 **매니페스트에 적는다**(`"account": 2`). CLI `--account` 는 덮어쓰기용이다.
+// ★ 왜 매니페스트인가: 예약 작업은 `run-publish.cmd <manifest>` 한 줄로 돈다.
+//   계정을 플래그로 두면 작업을 등록할 때마다 사람이 기억해야 하고,
+//   기억에 의존하는 안전장치는 재발을 막지 못한다(볼트의 code 4 결론).
+function resolveThreadsToken(env, manifest, cliAccount) {
+  const acc = String(cliAccount ?? manifest.account ?? 1);
+  if (acc !== '1' && acc !== '2') throw new Error(`account 는 1 또는 2 여야 한다: ${acc}`);
+  const key = acc === '1' ? 'THREADS_ACCESS_TOKEN' : 'THREADS_ACCESS_TOKEN_2';
+  if (!env[key]) throw new Error(`.env에 ${key} 없음 (account=${acc})`);
+  return { key, token: env[key], account: acc };
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -380,7 +387,7 @@ async function publishThreads({ images, text, textOnly, replies }, token, dryRun
 
 // ---------- main ----------
 const args = parseArgs();
-const env = loadEnv();
+const env = loadEnv(HERE);
 const manifest = JSON.parse(readFileSync(args.manifest, 'utf8'));
 const targets = args.target ? [args.target] : (manifest.targets ?? ['instagram']);
 
@@ -426,18 +433,23 @@ for (const target of targets) {
   try {
     let r;
     if (target === 'instagram') {
+      // ⛔ 2계정은 스레드 전용이다. 인스타로 새면 제휴 콘텐츠가 본계정에 나간다.
+      //    그건 되돌릴 수 없으므로 게이트가 아니라 여기서 막는다.
+      const acc = String(args.account ?? manifest.account ?? 1);
+      if (acc === '2') throw new Error('account=2 는 스레드 전용이다 — instagram 타깃을 쓸 수 없다');
       if (!env.IG_ACCESS_TOKEN) throw new Error('.env에 IG_ACCESS_TOKEN 없음');
       r = await publishInstagram({
         images: manifest.images, caption: manifest.caption ?? '', alts: manifest.alts,
         isAiGenerated: manifest.isAiGenerated === true,
       }, env.IG_ACCESS_TOKEN, args.dryRun, args.force);
     } else if (target === 'threads') {
-      if (!env.THREADS_ACCESS_TOKEN) throw new Error('.env에 THREADS_ACCESS_TOKEN 없음');
+      const { key, token, account } = resolveThreadsToken(env, manifest, args.account);
+      if (account !== '1') console.log(`[TH] ⚠️ 계정 ${account} 로 발행한다 (${key})`);
       const text = manifest.threadsText ?? (manifest.caption ?? '').slice(0, 500);
       r = await publishThreads({
         images: (manifest.images ?? []).slice(0, 20), text,
         textOnly: manifest.threadsTextOnly === true, replies: manifest.threadsReplies,
-      }, env.THREADS_ACCESS_TOKEN, args.dryRun, args.force);
+      }, token, args.dryRun, args.force);
     } else {
       throw new Error(`알 수 없는 target: ${target}`);
     }

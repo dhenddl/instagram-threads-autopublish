@@ -4,15 +4,12 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { loadEnv } from './env.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const IG_BASE = 'https://graph.instagram.com/v23.0';
 
-const env = {};
-for (const line of readFileSync(join(HERE, '.env'), 'utf8').split(/\r?\n/)) {
-  const m = line.match(/^([A-Z_]+)=(.*)$/);
-  if (m && m[2].trim()) env[m[1]] = m[2].trim();
-}
+const env = loadEnv(HERE);
 
 async function api(url, params) {
   const u = new URL(url);
@@ -28,7 +25,11 @@ console.log(`계정: @${me.json.username}\n`);
 
 const mediaList = await api(`${IG_BASE}/${me.json.id}/media`, {
   fields: 'id,caption,media_type,media_product_type,timestamp,permalink',
-  limit: '20',
+  // ⛔ 2026-08-24: 20 이면 게시물 40건 중 절반이 안 보인다. 8/05 에서 잘려
+  //    8/03 릴스(완주율 67.1% = 당시 최고)를 조사에서 놓쳤다.
+  //    ★ 「도구가 안 보여주는 영역을 없다고 판정」한 사례로 볼트에 기록됨.
+  //    발행이 늘면 또 잘린다 — 잘리면 여기를 올린다(응답 끝에 남은 개수를 찍는다).
+  limit: '60',
   access_token: token,
 });
 
@@ -51,12 +52,23 @@ const EXTRA = {
   IMAGE: 'profile_visits,follows',
 };
 
+// ★ API 는 timestamp 를 UTC(+0000) 로 준다 — check-threads-insights.mjs 와 같은 함정이다.
+//   07:00 KST = 전날 22:00 UTC 라 아침 발행분이 하루 앞당겨 찍힌다.
+//   ⛔ 인스타는 지금 07시 슬롯이 없어 아직 안 드러났을 뿐이고, 생기면 그날 걸린다.
+//      한쪽만 고치면 두 출력의 날짜가 서로 안 맞는다 — 그래서 같이 고친다.
+const kstDate = (ts) => {
+  if (!ts) return '????-??-??';
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return String(ts).slice(0, 10);
+  return d.toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' }); // sv-SE = YYYY-MM-DD
+};
+
 for (const m of mediaList.json.data) {
   const t = target(m);
   const base = BASE[t] || 'reach,likes,comments';
   const extra = EXTRA[t];
   const cap = (m.caption ?? '').slice(0, 24).replace(/\n/g, ' ');
-  console.log(`[${m.timestamp.slice(0, 10)}] [${m.media_type}/${m.media_product_type}] "${cap}"`);
+  console.log(`[${kstDate(m.timestamp)} KST] [${m.media_type}/${m.media_product_type}] "${cap}"`);
 
   let insights = await api(`${IG_BASE}/${m.id}/insights`, {
     metric: extra ? `${base},${extra}` : base, access_token: token,

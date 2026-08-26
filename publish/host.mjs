@@ -16,17 +16,10 @@ import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { buildAlts } from './alt.mjs';
+import { loadEnv } from './env.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-function loadEnv() {
-  const env = {};
-  for (const line of readFileSync(join(HERE, '.env'), 'utf8').split(/\r?\n/)) {
-    const m = line.match(/^([A-Z_]+)=(.*)$/);
-    if (m && m[2].trim()) env[m[1]] = m[2].trim();
-  }
-  return env;
-}
 
 const args = { dir: null, slug: 'post', slides: null };
 const argv = process.argv.slice(2);
@@ -37,7 +30,7 @@ for (let i = 0; i < argv.length; i++) {
 }
 if (!args.dir) { console.error('사용법: node host.mjs --dir <jpg폴더> [--slug day-1]'); process.exit(1); }
 
-const env = loadEnv();
+const env = loadEnv(HERE);
 if (!env.GH_USER || !env.GH_REPO) throw new Error('.env에 GH_USER / GH_REPO 필요');
 
 const srcDir = resolve(HERE, args.dir);

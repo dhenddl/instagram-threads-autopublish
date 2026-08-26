@@ -123,6 +123,9 @@ if (args.outro) outLines.push(args.outro);                 // 마지막 성공 �
 const CPS = args.hookText ? 60 : 30;
 const typeDur = (args.cmd.length / CPS) * 1000;
 const ENTER_PAUSE = args.hookText ? 220 : 350;
+// ✅ 2026-08-24 판정: **220ms 유지.** 권고는 300ms 이상이지만 훅이 있으면 결론이 0초에 이미
+//    전달됐으므로 "명령어 치는 화면"은 3초 이탈 구간 안의 죽은 시간이다. 위 LINE_STEP 판정과 같은
+//    근거·같은 재검토 조건(릴스 길이 연장).
 
 // ---- ★★ AI 음성 내레이션 (2026-08-11 신설) ----
 //
@@ -180,6 +183,12 @@ if (args.narrate) {
 const LINE_STEP = narrationMs
   ? Math.max(200, Math.round(narrationMs / outLines.length))
   : 470;                                                   // 줄당 등장 간격
+// ✅ 2026-08-24 판정: **470ms 유지.** OpenMontage 권고 줄 간격은 500~1100ms이고 우리는 30ms 빠르다
+//    (`--trace`가 매 렌더 `CHK`로 찍는다). 그래도 올리지 않는다 —
+//    ① 우리 이탈은 첫 3초에 몰려 있고(69~84%) 그 구간엔 줄이 2개뿐이다 = 줄 간격은 이탈 후의 변수
+//    ② 형식 레버 실측이 반박: 7/28 69.4 → 형식 만진 8/14 **89.0** → 소재 바꾼 8/19 **65.5**
+//    ③ 30ms를 도달 편차 속에서 가려내려면 회차가 여러 번 필요하다
+//    ▶ **재검토 조건: 릴스 길이 연장을 결정하는 순간**(11초 압축이라는 근거가 사라진다).
 const END_HOLD = 2400;
 
 // ★★★ 훅 프레임 (2026-08-06 신설) — 0초에 결론을 전달한다.
@@ -288,10 +297,35 @@ body { font-family:${fonts.mono}; color:var(--text); }
   box-sizing:border-box; overflow:hidden; }
 .term.compact #out { margin-top:26px; }
 .term.compact .ln { margin:6px 0; }
+/* ★ 자막 크기·굵기·줄높이는 2026-08-24 외부 규격 수집으로 확증됐다:
+   권고 60~75px / 700~900 / 1.3배 ↔ 우리 64 / 800 / 1.32 = 셋 다 밴드 중앙.
+   08-11에 가이드를 안 보고 고른 값이라 외부 확증 1건으로 센다. 건드리지 말 것.
+   ⚠️ 좌우 76px 은 부족하다 — 08-24 앱 실측 결과 인스타 우측 아이콘 열이 x 967 에서 시작한다
+      (필요 여백 113, 권고 120). 고치면 발행 산출물이 바뀌므로 사용자 결정 사항으로 남겼다.
+   ★★ font-variant-numeric: tabular-nums 는 2026-08-24 신설.
+      근거: 독립 출처 3건이 같은 요구를 한다 — video-shotcraft odometer-digit-roll 카드
+      (비등폭이면 한 칸 굴릴 때마다 줄 전체가 흔들린다고 명시) · 08-24 수집한 릴스 자막 규격 ·
+      AUBRIER 프롬프트의 타이포 절. 자막에는 실측 수치(도달·이탈률·완주율)가 들어간다.
+
+      ⛔⛔ **정정 (같은 날 실측) — 이 선언은 지금 아무 효과가 없다.**
+      Playwright 로 우리 실제 스택을 렌더해 글자 폭을 쟀다:
+        도달 297 / 103 / 111 / 888  ->  네 값 모두 244.94px (64px 기준) · 편차 0.00px
+        tabular-nums 를 켠 쪽과 차이 0.00px · 훅 112px 395.72px · CTA 40px 211.45px 도 전부 동일
+      원인: sans 스택 첫 두 이름(Pretendard Variable, Pretendard)이 **이 머신에 설치돼 있지 않다**.
+      실제로 그려지는 것은 **Noto Sans KR** 이고 **그 폰트의 숫자는 이미 등폭**이라 바꿀 것이 없었다.
+      ▶ **그래도 지우지 않는다**: Pretendard 가 설치되는 순간 스택 1번이 잡히고, 그 폰트의 숫자 폭 거동은
+        확인하지 않았다. 그때 이 한 줄이 보험이 된다.
+      ★ 이건 mono 스택과 **같은 상태다** — palette.mjs 가 Cascadia Code / D2Coding 을 선언하지만
+        둘 다 미설치라 지금까지 모든 렌더가 Consolas 였다. **sans 도 선언과 실제가 다르다.**
+        폰트를 설치하는 것이 과거 발행분과 신규분을 갈라놓는다는 경고가 여기에도 적용된다.
+
+      ⚠️ 훅(.hook .ht)과 CTA(.pill)에는 넣지 않았다 — 그쪽은 발행에 나간다.
+         (실측상 지금은 넣어도 화면이 같지만, Pretendard 가 들어오면 달라질 수 있어 사용자 결정으로 남겼다)
+      이 자막 블록은 음성 큐가 없으면 렌더되지 않아(아래 참조) 현 발행 산출물이 바뀌지 않는다. */
 #sub { position:absolute; left:0; right:0; top:640px; padding:0 76px;
   font-family:${fonts.sans}; font-size:64px; font-weight:800; line-height:1.32;
   color:var(--text); text-wrap:pretty; word-break:keep-all; overflow-wrap:break-word;
-  letter-spacing:-0.02em; }
+  font-variant-numeric: tabular-nums; letter-spacing:-0.02em; }
 /* ★ 캐릭터 (2026-08-11). assets/characters/README.md의 **실측 배치를 그대로** 쓴다:
    높이 520px · 우측 여백 56px · 바닥에서 300px 이상(인스타 하단 UI인 캡션·버튼을 피하는 값).
    ⚠️ image-rendering:pixelated 필수 — 픽셀아트를 bilinear로 늘리면 계단이 뭉개져 정체성이 깨진다.

@@ -11,6 +11,10 @@ const ENV_PATH = join(dirname(fileURLToPath(import.meta.url)), '.env');
 const TARGETS = [
   { key: 'IG_ACCESS_TOKEN', url: 'https://graph.instagram.com/refresh_access_token', grant: 'ig_refresh_token', label: 'Instagram' },
   { key: 'THREADS_ACCESS_TOKEN', url: 'https://graph.threads.net/refresh_access_token', grant: 'th_refresh_token', label: 'Threads' },
+  // 2계정(토스 쉐어링크 운용, 2026-08-25 신설). 아직 .env 에 없으면 위 루프가 "토큰 없음 — 건너뜀"으로 지나간다.
+  // ★ 그래서 토큰이 들어오는 순간부터 자동으로 갱신 대상이 된다 — 사람이 여기를 다시 고칠 일이 없다.
+  // ⚠️ `^THREADS_ACCESS_TOKEN=` 는 뒤에 `=` 를 요구하므로 `THREADS_ACCESS_TOKEN_2=` 와 섞이지 않는다.
+  { key: 'THREADS_ACCESS_TOKEN_2', url: 'https://graph.threads.net/refresh_access_token', grant: 'th_refresh_token', label: 'Threads(2계정)' },
 ];
 
 const original = readFileSync(ENV_PATH, 'utf8');
