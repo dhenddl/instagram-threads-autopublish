@@ -101,7 +101,7 @@ render.js (slides.json → JPG)
 ### ★★★ 훅 프레임 (`--hook-text`, 2026-08-06 신설) — 결론을 0초에 둔다
 
 ```bash
-node make-termcast.mjs --lines out/x/lines.txt --cmd "node check-insights.mjs" --title "x.sh" \
+node make-termcast.mjs --lines lines/x.txt --cmd "node check-insights.mjs" --title "x.sh" \
   --hook-badge "릴스 6건 · 전부 API 실측" \
   --hook-text "도달 2 vs 178" \
   --hook-sub "완주율은 53% vs 51%.\n거의 같은데 89배 차이예요." \

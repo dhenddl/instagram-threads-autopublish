@@ -105,3 +105,46 @@ for (const t of list.json.data) {
   const line = insights.json.data.map(i => `${i.name}=${i.values?.[0]?.value ?? i.total_value?.value}`).join(' · ');
   console.log(`[${kstDate(t.timestamp)} KST] "${cap}"\n  ${line}`);
 }
+
+// ── 아웃바운드 활동 (2026-08-27 신설) ─────────────────────────────
+//
+// 왜 여기 붙였나:
+//   2026-08-26 22:10 부터 사람이 **남의 글에 답글·리포스트**를 하기 시작했다.
+//   그 직전 두 회차는 조회 3·3 이었고, 그 뒤 두 회차는 43·38 이다.
+//   ⛔ 그런데 같은 시점에 **소재도 바뀌었다**(토스 기능 설명 → 자동화·막힘 고백).
+//      둘이 완전히 교락돼서 무엇이 올렸는지 못 가른다.
+//   ★★ 못 가르는 것보다 나쁜 건 **세지도 않는 것**이다. 세어두면 나중에
+//      활동이 뜸한 날이 저절로 생겼을 때 그게 자연 실험이 된다.
+//
+// 판정 규칙: `/me/replies` 의 `root_post.username` 이 **내 핸들이 아니면 남의 글**이다.
+//   ⚠️ 남의 글은 username 이 아예 안 온다(권한 밖). 그래서 "다르면"이 아니라
+//      "내 핸들과 같지 않으면"으로 판정한다 — 빈 값도 남의 글로 센다.
+//   ⛔ `is_reply_owned_by_me` 로는 못 가른다. 내가 쓴 답글이면 전부 true 라
+//      "누구 글에 달았나"를 말해주지 않는다(2026-08-27 실측).
+const pageAll = async (url, params) => {
+  let r = await api(url, params);
+  const all = [...(r.json?.data ?? [])];
+  while (r.json?.paging?.next) { const res = await fetch(r.json.paging.next); r = { ok: res.ok, json: await res.json() }; all.push(...(r.json?.data ?? [])); }
+  return all;
+};
+
+const reps = await pageAll(`${TH_BASE}/${me.json.id}/replies`, {
+  fields: 'id,timestamp,root_post{username}', limit: '100', access_token: token,
+});
+const roots = await pageAll(`${TH_BASE}/${me.json.id}/threads`, {
+  fields: 'id,timestamp,media_type', limit: '100', access_token: token,
+});
+const outbound = reps.filter((r) => (r.root_post?.username ?? '') !== me.json.username);
+const reposts = roots.filter((r) => r.media_type === 'REPOST_FACADE');
+
+const byDay = {};
+for (const r of outbound) (byDay[kstDate(r.timestamp)] ??= { rep: 0, rp: 0 }).rep++;
+for (const r of reposts) (byDay[kstDate(r.timestamp)] ??= { rep: 0, rp: 0 }).rp++;
+const days = Object.keys(byDay).sort().slice(-10);
+
+console.log(`\n── 아웃바운드 활동 (남의 글에 단 답글 · 리포스트) ──`);
+console.log(`   누적: 답글 ${outbound.length}건 · 리포스트 ${reposts.length}건`);
+if (!days.length) console.log('   기록 없음');
+else for (const d of days) console.log(`   ${d} KST   답글 ${String(byDay[d].rep).padStart(3)} · 리포스트 ${String(byDay[d].rp).padStart(3)}`);
+console.log('   ⚠️ 이 숫자는 위 조회수와 **같은 날 안에서도 순서가 있다.** 발행보다 늦은 활동은');
+console.log('      그 회차 초반 도달에 영향을 못 준다 — 판독할 때 시각까지 본다.');

@@ -39,8 +39,15 @@ if (!existsSync(repoDir)) {
 } else {
   git('pull --rebase');
 }
-git(`config user.name "${env.GH_USER}"`);
-git(`config user.email "${env.GH_USER}@users.noreply.github.com"`);
+// ★ 이미 noreply 면 존중한다 (2026-08-27). 근거·이유는 host.mjs 의 같은 자리에 적었다.
+//   요약: ID 접두 형식이라야 커밋이 계정에 붙는데, 이 파일은 공개 자료 1호라 ID 를 박을 수 없다.
+//   안전 속성(실명·회사 이메일이 절대 안 쓰인다)은 그대로다.
+let curMail = '';
+try { curMail = git('config user.email'); } catch { curMail = ''; }
+if (!/@users\.noreply\.github\.com$/.test(curMail)) {
+  git(`config user.name "${env.GH_USER}"`);
+  git(`config user.email "${env.GH_USER}@users.noreply.github.com"`);
+}
 
 const postPath = `posts/${args.slug}-${randomBytes(4).toString('hex')}`;
 mkdirSync(join(repoDir, postPath), { recursive: true });

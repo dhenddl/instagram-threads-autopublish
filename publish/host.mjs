@@ -48,8 +48,21 @@ if (!existsSync(repoDir)) {
   git('pull --rebase');
 }
 // 익명 분리: 공개 리포의 커밋 작성자를 전용 계정 명의로 고정 (전역 git 설정의 실명 노출 방지)
-git(`config user.name "${env.GH_USER}"`);
-git(`config user.email "${env.GH_USER}@users.noreply.github.com"`);
+//
+// ★ 이미 noreply 로 설정돼 있으면 건드리지 않는다 (2026-08-27).
+//   깃허브 noreply 는 두 형식이 있다 — `이름@users.noreply.github.com`(구형식)과
+//   `숫자ID+이름@users.noreply.github.com`(ID 접두). **ID 접두라야 커밋이 계정에 확실히 붙는다.**
+//   여기서 무조건 덮어쓰면 사람이 더 정확한 값을 넣어둬도 매 실행마다 구형식으로 되돌아간다.
+//   ⛔ 그렇다고 ID 를 소스에 박을 수는 없다 — 이 파일은 공개 자료 1호에 들어간다.
+//      박으면 남의 클론이 우리 계정 명의로 커밋한다.
+//   ▶ 그래서 「비어 있거나 noreply 가 아니면 안전한 기본값을 넣고, 이미 noreply 면 존중한다」.
+//     안전 속성(실명·회사 이메일이 절대 안 쓰인다)은 그대로다.
+let curMail = '';
+try { curMail = git('config user.email'); } catch { curMail = ''; }
+if (!/@users\.noreply\.github\.com$/.test(curMail)) {
+  git(`config user.name "${env.GH_USER}"`);
+  git(`config user.email "${env.GH_USER}@users.noreply.github.com"`);
+}
 
 // 랜덤 경로에 복사 (발행 전 노출 방지)
 const postPath = `posts/${args.slug}-${randomBytes(4).toString('hex')}`;
@@ -75,9 +88,30 @@ if (args.slides) {
 }
 
 // 발행 manifest 생성 (캡션은 검수 단계에서 채움)
+//
+// ⛔⛔ 2026-08-27 이전에는 **무조건 새 객체로 덮어썼다.**
+//   준비가 끝난 회차에 이 스크립트를 다시 돌리면 `caption`·`threadsText`·`threadsReplies`·
+//   `publishDate`·`isAiGenerated` 가 **전부 빈 값으로 날아갔고, 아무 검사도 그걸 안 잡았다.**
+//   실제로 `post-ai-law-31.json` 은 caption 397자 + 답글 2건을 들고 있었다.
+//   ★ 재호스팅은 「이미지를 다시 올리는 일」이지 「원고를 다시 쓰는 일」이 아니다.
+// ▶ 그래서 기존 매니페스트가 있으면 **이미지 URL 만 갈아끼우고 나머지는 그대로 둔다.**
+//   alt 는 --slides 를 준 회차에서만 다시 만든다(안 주면 기존 값을 지키는 게 맞다).
 const manifestPath = join(HERE, `post-${args.slug}.json`);
-const manifest = { caption: '', threadsText: '', images: urls, targets: ['instagram', 'threads'] };
-if (alts) manifest.alts = alts;
+let manifest;
+if (existsSync(manifestPath)) {
+  const prev = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  const before = Array.isArray(prev.images) ? prev.images.length : 0;
+  if (before && before !== urls.length) {
+    console.warn(`⚠️ 이미지 장수가 달라졌다: 기존 ${before}장 → 새 ${urls.length}장. alts·캡션이 어긋날 수 있다.`);
+  }
+  manifest = { ...prev, images: urls };
+  if (alts) manifest.alts = alts;
+  const kept = Object.keys(prev).filter((k) => k !== 'images' && !(alts && k === 'alts'));
+  console.log(`기존 매니페스트 갱신 — images${alts ? ' + alts' : ''} 만 바꿨다. 보존: ${kept.join(', ') || '(없음)'}`);
+} else {
+  manifest = { caption: '', threadsText: '', images: urls, targets: ['instagram', 'threads'] };
+  if (alts) manifest.alts = alts;
+}
 writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 
 console.log(`\n업로드 완료: ${jpgs.length}장 → ${postPath}`);
