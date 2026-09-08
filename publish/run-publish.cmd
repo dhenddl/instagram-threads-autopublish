@@ -10,7 +10,7 @@ REM  ASCII ONLY. Do NOT put Korean text or emoji in this file.
 REM  2026-08-11: Korean REM comments silently broke cmd parsing.
 REM  No log was written AND it still returned exit 0 (false success),
 REM  which the scheduler records as a successful publish.
-REM  Full rationale lives in second-brain/wiki/log.md (2026-08-11).
+REM  Full rationale lives in <노트 문서 경로> (2026-08-11).
 REM
 REM  NODE is pinned on purpose. The nvm symlink C:\nvm4w\nodejs gets
 REM  switched to older versions for day-job work, and publish.mjs is

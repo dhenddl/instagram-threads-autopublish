@@ -14,7 +14,7 @@
 //     안 주면 릴스만 기본 초록으로 나가서 캐러셀과 어긋난다.
 //   ★ 렌더 전 페이싱 검산: 같은 인자에 `--trace` 만 붙인다 — 렌더하지 않고
 //     비트별 누적 시각(훅→타이핑→각 출력 줄→END_HOLD→루프)과 점검 4줄을 찍는다.
-//     기준의 출처는 second-brain/wiki/summaries/도구-조사/OpenMontage 조사 (2026-08-24 ...).md
+//     기준의 출처는 <노트 문서 경로> 조사 (2026-08-24 ...).md
 import { chromium } from 'playwright';
 import ffmpegPath from 'ffmpeg-static';
 import { spawnSync } from 'node:child_process';
@@ -468,7 +468,7 @@ const outAbs = resolve(HERE, args.out);
 //     처방은 **렌더 전에** 스텝 길이를 누적해 각 비트의 영상 시각을 찍는 것이다(근거: "렌더 1분이 아깝다").
 //     우리는 총계만 찍고 있었다 — `--outro` 교체나 출력 줄 수 변화가 타임라인을 조용히 바꿔도
 //     **렌더가 끝난 뒤에야** 안다.
-//     출처: second-brain/wiki/summaries/도구-조사/OpenMontage 조사 (2026-08-24 ...).md
+//     출처: <노트 문서 경로> 조사 (2026-08-24 ...).md
 //
 // ⚠️ 이 블록은 **로그 전용**이고 프레임을 만들기 전에 종료한다 — `--trace`를 안 주면
 //    지금까지 나간 릴스와 **바이트 단위로 동일**하다(A/B 해시 회귀 검증).

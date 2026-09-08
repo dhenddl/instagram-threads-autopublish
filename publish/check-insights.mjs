@@ -1,7 +1,7 @@
 // check-insights.mjs — 최근 게시물 전체 인사이트 조회 (읽기 전용, 발행 없음)
 // 사용법: node check-insights.mjs
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, appendFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { loadEnv } from './env.mjs';
@@ -63,6 +63,10 @@ const kstDate = (ts) => {
   return d.toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' }); // sv-SE = YYYY-MM-DD
 };
 
+// ── 측정 스냅샷 (2026-08-31 신설) — check-threads-insights.mjs 와 같은 이유·같은 규약 ──
+// ⛔ 기본 저장. --no-snapshot 으로만 끈다. 판정은 여기서 안 한다(check-settled.mjs).
+const RUN_TS = new Date().toISOString();
+const SNAP = [];
 for (const m of mediaList.json.data) {
   const t = target(m);
   const base = BASE[t] || 'reach,likes,comments';
@@ -84,6 +88,18 @@ for (const m of mediaList.json.data) {
   }
   const line = insights.json.data.map(i => `${i.name}=${i.values?.[0]?.value ?? i.total_value?.value}`).join(' · ');
   console.log(`  ${line}`);
+  {
+    // 스냅샷용 수치 추출 — 캐러셀엔 views 가 없어 undefined 로 남고,
+    // JSON.stringify 가 키를 빼므로 check-settled 가 reach 를 지표로 고른다.
+    const num = (n) => {
+      const i = insights.json.data.find((x) => x.name === n);
+      return i ? Number(i.values?.[0]?.value ?? i.total_value?.value ?? NaN) : undefined;
+    };
+    SNAP.push({
+      ts: RUN_TS, surface: 'instagram', id: m.id, published: m.timestamp, caption: cap,
+      type: `${m.media_type}/${m.media_product_type}`, reach: num('reach'), views: num('views'),
+    });
+  }
   if (degraded) console.log(`  ⚠️ 확장 지표 미지원으로 기본 조합만 조회함 (요청했던 것: ${extra})`);
 
   // profile_activity는 breakdown=action_type을 함께 보내야 세부가 나오고,
@@ -109,4 +125,19 @@ function target(m) {
   const p = m.media_product_type;
   if (p === 'REELS' || p === 'STORY') return p;
   return m.media_type;
+}
+
+// ── 스냅샷 저장 (마지막에 한 번) ─────────────────────────────
+// ⚠️ 회차마다 append 하면 중간에 죽었을 때 반쪽 측정이 남고, 그건 다음 실행에서
+//    가짜 증가율이 된다. 그래서 전량을 읽은 뒤 한 번만 쓴다.
+if (!process.argv.includes('--no-snapshot')) {
+  if (SNAP.length) {
+    appendFileSync(join(HERE, 'logs', 'insight-snapshots.jsonl'),
+      SNAP.map((r) => JSON.stringify(r)).join('\n') + '\n', 'utf-8');
+    console.log(`\n📸 스냅샷 ${SNAP.length}건 저장 — 판정은 \`node check-settled.mjs\``);
+  } else {
+    console.log('\n⚠️ 스냅샷 0건 — 저장 안 함.');
+  }
+} else {
+  console.log('\n⚠️ --no-snapshot: 측정 이력을 남기지 않았다. 증가율 판정은 이력이 있어야 된다.');
 }

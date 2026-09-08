@@ -77,7 +77,7 @@ render.js (slides.json → JPG)
 
 ## 릴스 캡션 자동 생성 (reel-caption.mjs)
 
-**2026-07-23 도입** — 그동안 릴스는 폰 수동 업로드라 캡션·해시태그 입력까지 사람 손이었고, 실제로 계속 빈 채로 발행되고 있었음(진단 → [[성과 진단 로그]]). `make-reels.mjs`/`make-termcast.mjs`가 영상 생성 후 **자동으로 `pipeline/publish/post-<슬러그>.json`의 caption을 찾아 영상 옆에 `<이름>-caption.txt`로 저장**한다. 폰 업로드 시 이 파일을 열어 복붙하면 끝.
+**2026-07-23 도입** — 그동안 릴스는 폰 수동 업로드라 캡션·해시태그 입력까지 사람 손이었고, 실제로 계속 빈 채로 발행되고 있었음(진단 → 「<성과 기록 문서>」). `make-reels.mjs`/`make-termcast.mjs`가 영상 생성 후 **자동으로 `pipeline/publish/post-<슬러그>.json`의 caption을 찾아 영상 옆에 `<이름>-caption.txt`로 저장**한다. 폰 업로드 시 이 파일을 열어 복붙하면 끝.
 
 - 슬러그는 기본으로 출력 폴더명에서 추론(`out/day-2/...` → `day-2` → `post-day-2.json`). 다르면 `--slug <이름>` 또는 매니페스트 경로를 직접 `--manifest <path>`로 지정.
 - `--drive` 사용 시 **영상과 캡션.txt가 같이 드라이브에 올라감**(원격 업로드 대비, 2026-07-23~) — 폰 드라이브 앱에서 두 파일 다 확인 가능.

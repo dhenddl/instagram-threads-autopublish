@@ -10,6 +10,9 @@
 //     "caption": "인스타 캡션 (해시태그 포함)",
 //     "threadsText": "스레드용 텍스트 (최대 500자, 없으면 caption 앞 500자 사용)",
 //     "threadsReplies": ["답글1", "답글2"],                      // 선택. 셀프 답글 체인(부모→답글1→답글2 연쇄)
+//     "blogUrl": "https://dhenddl1.tistory.com/10",             // 선택. 스레드 답글 **맨 뒤**에 블로그 링크 한 줄
+//     "blogUrl": { "url": "...", "text": "이 회차 전문은" },      //   문구를 그 회차에서 덮어쓸 때
+//        ⚠️ 본계정 전용 · 짝 글 있는 회차만 단다(없는 회차가 A/B 대조군) · 게이트 check-blog-url.mjs
 //     "images": ["https://.../01.jpg", "https://.../02.jpg"],   // 공개 URL, JPEG만
 //     "alts": ["1번 대체텍스트", "2번 대체텍스트", ...],          // 선택. 이미지와 같은 순서. SEO+접근성
 //     "isAiGenerated": true,                                    // 선택. 인스타 캐러셀에 AI 라벨을 켠다(기본 false)
@@ -24,9 +27,9 @@
 // 전제: .env에 IG_ACCESS_TOKEN / THREADS_ACCESS_TOKEN (장기 토큰).
 // ⚠️ 첫 실행 전 미검증 스켈레톤 — 토큰 발급 후 dry-run으로 반드시 먼저 확인할 것.
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, basename } from 'node:path';
 import { loadEnv } from './env.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -36,7 +39,7 @@ const TH_BASE = 'https://graph.threads.net/v1.0';
 // ---------- 공통 유틸 ----------
 
 function parseArgs() {
-  const args = { dryRun: false, target: null, manifest: null, force: false, account: null };
+  const args = { dryRun: false, target: null, manifest: null, force: false, account: null, skipGates: false };
   const argv = process.argv.slice(2);
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--dry-run') args.dryRun = true;
@@ -44,8 +47,9 @@ function parseArgs() {
     else if (argv[i] === '--manifest') args.manifest = argv[++i];
     else if (argv[i] === '--force') args.force = true;      // 24시간 중복 검사 통과(의도한 재발행)
     else if (argv[i] === '--account') args.account = argv[++i];   // 2계정 운용(2026-08-25 신설)
+    else if (argv[i] === '--skip-gates') args.skipGates = true;   // ⛔ 발행 직전 게이트를 건너뛴다 — 이유를 log.md 에 남긴다(2026-08-28)
   }
-  if (!args.manifest) { console.error('사용법: node publish.mjs --manifest post.json [--dry-run] [--target instagram|threads] [--force] [--account 1|2]'); process.exit(1); }
+  if (!args.manifest) { console.error('사용법: node publish.mjs --manifest post.json [--dry-run] [--target instagram|threads] [--force] [--account 1|2] [--skip-gates]'); process.exit(1); }
   return args;
 }
 
@@ -422,6 +426,152 @@ if (manifest.threadsReplies !== undefined) {
   });
 }
 
+// ── blogUrl — 스레드 답글 맨 뒤에 블로그 링크 한 줄 (2026-08-31 신설) ──────
+//
+// ⛔⛔ 왜 넣었나: 매니페스트 **91개 중 블로그 링크가 0건**이었다. 스레드 중앙 ~70 ·
+//   릴스 중앙 ~113 의 도달이 **블로그로 한 번도 흘러간 적이 없다.**
+//   → 「블로그 방문자 유입 특단 조치 (2026-08-30)」 관 ①.
+//
+// ★ 범위는 **짝 글 있는 회차만**이다 (사용자 결정 2026-08-31).
+//   권고안은 「전 회차」였는데 **뒤집었다** — 전 회차에 달면 대조군이 사라져
+//   같은 문서가 계획한 **A/B(링크 있는 회차 vs 없는 회차 조회)가 불가능**해진다.
+//   ▶ 그래서 `blogUrl` 은 **선택 필드**다. 없는 회차가 그대로 대조군이 된다.
+//   ⚠️ 무작위 배정이 아니다 — 짝 글 유무는 소재가 정한다. 결과를 인과로 읽지 않는다.
+//
+// ★★ 문구는 **발행 원고**다. CLAUDE.md 작업 4 가 적용된다 —
+//    *"사용자 문장을 마음대로 고쳐 새 원고로 주지 않는다."*
+//    ▶ 기본 문구는 **여기 한 곳**에만 둔다. 회차마다 다르게 쓰려면
+//      `"blogUrl": { "url": "...", "text": "..." }` 로 그 회차에서 덮어쓴다.
+//    ⛔ 이모지·과장·「필독」류를 넣지 않는다. 본계정 스레드 답글엔 이모지가 없다.
+//
+// ★★ 문안 확정 2026-08-31 (사용자). 초안 *"이 회차 전문과 코드는 여기 적어놨습니다"* 를 **뒤집었다.**
+//   ⛔ **「전문」이 부정확하다** — 티스토리 EP 는 그 스레드 회차의 긴 버전이 아니라 **다른 글**이다
+//     (구축기 전체를 쓴 것이고 스레드는 그날의 한 조각). 「코드」도 짝 글이 네이버(정책)면 안 맞는다.
+//   ★ 이 계정의 축이 실측·정직인데 **첫 CTA 가 부정확하면** 그 축을 깎는다.
+//   ▶ 확정안은 **스레드 프로필 bio 마지막 줄과 같은 말**이다 —
+//     bio: *"· 만드는 과정은 블로그에 길게 씁니다 👇"*
+//     프로필에서 본 문장을 답글에서 다시 본다. 같은 사람이 같은 말을 하는 걸로 읽힌다.
+//     그리고 **회차·플랫폼 무관하게 참**이라 기본값을 거의 안 바꿔도 된다.
+//
+// ⚠️ 이건 본계정의 **첫 CTA 답글**이다. 기존 답글 전량이 「내용」이었다
+//   (숫자·날짜·자기 실패를 적는 본편의 연장). 91개 매니페스트에 링크가 0건이던 건
+//   우연이 아니라 그 결과였다. **결이 다른 답글이 하나 끼는 것**을 알고 넣는다.
+// ⚠️ 고시문구 대상이 아니다 — 우리 블로그라 대가 관계가 없다. 토스 링크와 다르다.
+const BLOG_REPLY_DEFAULT = '만드는 과정은 블로그에 길게 적어놨습니다.';
+
+// 계정·도메인·생사 판정은 **check-blog-url.mjs 게이트**가 한다. 여기서는 모양만 본다.
+// ⛔ 같은 규칙을 두 곳에 적지 않는다 — 한 곳만 고쳐진다.
+if (manifest.blogUrl !== undefined) {
+  const b = manifest.blogUrl;
+  const ok = typeof b === 'string' ? b.trim() : (b && typeof b === 'object' && typeof b.url === 'string' ? b.url.trim() : null);
+  if (!ok) throw new Error('blogUrl 은 문자열이거나 { url, text } 여야 함');
+  if (b && typeof b === 'object' && b.text !== undefined && (typeof b.text !== 'string' || !b.text.trim())) {
+    throw new Error('blogUrl.text 가 빈 문자열');
+  }
+}
+
+// 답글 배열 끝에 블로그 한 줄을 붙인다. 원본 매니페스트는 안 건드린다.
+function withBlogReply(m, account) {
+  const base = m.threadsReplies ?? [];
+  if (m.blogUrl === undefined) return m.threadsReplies;
+  // ⛔ 2계정에는 안 붙인다. 게이트가 이미 막지만 `--skip-gates` 경로가 있어
+  //   **발행 직전에 한 번 더** 본다. 링크는 되돌릴 수 없다.
+  if (String(account) === '2') {
+    console.log('[TH] ⚠️ 2계정이라 blogUrl 을 붙이지 않는다 (블로그 링크는 본계정만).');
+    return m.threadsReplies;
+  }
+  const url = typeof m.blogUrl === 'string' ? m.blogUrl.trim() : m.blogUrl.url.trim();
+  const head = (typeof m.blogUrl === 'object' && m.blogUrl.text ? m.blogUrl.text : BLOG_REPLY_DEFAULT).trim();
+  const line = `${head}\n${url}`;
+  if (line.length > 500) throw new Error(`blogUrl 답글이 500자 초과 (${line.length}자)`);
+  console.log(`[TH] ↳ blogUrl 답글을 체인 끝에 붙인다 (${base.length + 1}번째): ${url}`);
+  return [...base, line];
+}
+
+// ── 발행 직전 게이트 (2026-08-28 신설, 사용자 지시) ────────────────────────
+//
+// ⛔⛔ 왜 넣었나: 2026-08-28 「게이트 목록」 을 만들다 **발행 경로에 게이트가 하나도
+//   안 걸려 있는 걸** 찾았다. `run-publish.cmd` 는 이 파일 하나만 부르고, 이 파일은
+//   아무 검사도 안 불렀다. 게이트 14개가 있는데 **발행은 그중 0개를 지나갔다.**
+//
+// ★ 무엇을 부르나 — **자기 회차만** 본다(`--only`).
+//   ⛔ 전량 검사를 걸면 **다른 회차 원고의 문제로 오늘 19:00 스레드가 안 나간다.**
+//      그건 게이트가 아니라 사고다. 그래서 세 게이트에 `--only` 를 먼저 넣었다.
+//
+// ★ 드라이런에서도 돈다 — 검수 목적이 「발행해도 되나」인데 그때 안 보면 늦다.
+//
+// ⛔ 막히면 **아무것도 발행하지 않는다.** API 를 한 번도 안 때리므로 **고쳐서 다시 돌리면 된다**
+//    (컨테이너도 안 만든다 → 중복 걱정 없음). 종료 코드 **2** 로 「게이트 차단」을 구분한다.
+//    0=성공 · 1=발행 실패 · 2=게이트 차단. 예약 작업 기록에서 셋이 갈린다.
+import { spawnSync as _spawnSync } from 'node:child_process';
+const GATES = [
+  ['check-toss.mjs', '토스 링크·고시문구'],
+  ['check-numbers.mjs', '미검증 숫자'],
+  ['check-rank-claims.mjs', '시간 지나면 틀려지는 표현'],
+  // 2026-08-28 추가 — 공정위 「추천·보증 심사지침」(시행 2026-06-01) AI 가상인물 표시.
+  // ★ 지금은 겹치는 회차가 0건이라 **한 번도 안 막는다.** 그게 정상이다 —
+  //   이 게이트는 「본계정 릴스에 제휴를 붙이는 날」을 위해 미리 걸어두는 것이다.
+  ['check-virtual-person.mjs', 'AI 가상인물 표시'],
+  // 2026-08-31 추가 — blogUrl 이 실제로 열리는 주소인가.
+  // ⚠️⚠️ **이 게이트만 네트워크를 탄다.** 나머지 넷은 파일만 본다.
+  //   순간 장애로 막으면 그날 19:00 스레드가 안 나간다 — 그건 사고다.
+  //   ▶ 그래서 그 게이트는 **404·410·403 만 막고, 타임아웃·5xx 는 경고만** 한다.
+  //     「못 물어본 것」과 「없는 것」은 다르다.
+  ['check-blog-url.mjs', '블로그 링크 생사'],
+  // 2026-09-03 추가 (사용자 지시) — AI 티 중 **기계화되는 축만**.
+  // ⛔⛔ 「AI 티 검사」를 통째로 올리지 않았다. 0절 채우기 4항목 중 **1개만** 기계화되고,
+  //     숫자 0개를 막으면 실측 23/268건(그중 스레드 본문 18건)이 막힌다 —
+  //     오늘 아침 나간 회차와 9/04·9/07 회차가 거기 들어 있다. 그건 사고다.
+  //   ▶ 그래서 **차단은 종결어미 4연속 하나**뿐이고 나머지는 경고로 통과시킨다.
+  // ★ 지금은 한 번도 안 막는다(실측 최댓값 3연속). `check-virtual-person` 과 같은 계열 —
+  //   회귀를 위해 미리 걸어두는 것이다. 근거·분포는 check-ai-tell.mjs 헤더에 있다.
+  ['check-ai-tell.mjs', 'AI 티 (종결어미 연속)'],
+];
+if (args.skipGates) {
+  console.log('⚠️⚠️ --skip-gates: 발행 직전 게이트를 건너뛴다. **이유를 log.md 에 남길 것.**');
+} else {
+  const manifestName = basename(args.manifest);
+  // ⛔⛔ 게이트 파일이 아예 없는 경우를 **따로 가른다** (2026-09-08 신설).
+  //   왜: 없으면 node 가 exit 1 을 내고, 그게 그대로 blockedBy 에 들어가
+  //   「게이트가 막았다」로 찍힌다 — 받는 사람은 **자기 원고 문제로 오인한다.**
+  //   ★ 공개 자료로 클론한 저장소에서 실제로 그런 상태였다(1호, 게이트 6개 전부 없음).
+  // ⛔ 조용히 건너뛰지 않는다. 막되 **원인을 정확히 말한다.**
+  const missing = GATES.filter(([s]) => !existsSync(join(HERE, s)));
+  if (missing.length) {
+    console.error('');
+    console.error('⛔⛔ 발행 직전 게이트 파일이 이 저장소에 없다 — **아무것도 발행하지 않았다.**');
+    for (const [script, what] of missing) console.error(`     · ${script.padEnd(24)} ${what}`);
+    console.error('');
+    console.error('▶ 원고 문제가 아니다. 파일이 없는 것이다. 둘 중 하나를 한다:');
+    console.error('   ① 게이트를 같은 폴더에 둔다 (github.com/dhenddl/vault-publish-gates 에 일부가 있다)');
+    console.error('   ② 검사 없이 발행하려면 --skip-gates 를 준다');
+    process.exit(2);
+  }
+  const blockedBy = [];
+  for (const [script, what] of GATES) {
+    const r = _spawnSync(process.execPath, [join(HERE, script), '--only', manifestName],
+      { encoding: 'utf-8', cwd: HERE });
+    if (r.error) { blockedBy.push([script, what, `실행 자체가 실패: ${r.error.message}`]); continue; }
+    if (r.status !== 0) blockedBy.push([script, what, (r.stdout || '') + (r.stderr || '')]);
+    else console.log(`[게이트] ✅ ${script.padEnd(22)} ${what}`);
+  }
+  if (blockedBy.length) {
+    console.error('');
+    console.error('⛔⛔ 발행 직전 게이트가 막았다 — **아무것도 발행하지 않았다.**');
+    for (const [script, what, out] of blockedBy) {
+      console.error(`\n──── ${script} (${what})`);
+      console.error(String(out).trim().split('\n').map((l) => '  ' + l).join('\n'));
+    }
+    console.error('');
+    console.error('▶ 고친 뒤 **같은 명령을 그대로 다시 돌린다.** API 를 한 번도 안 때렸으므로 중복 위험이 없다:');
+    console.error(`     node publish.mjs --manifest ${manifestName}${args.dryRun ? ' --dry-run' : ''}`);
+    console.error('  또는 예약 작업으로 다시 돌리려면:');
+    console.error(`     Start-ScheduledTask -TaskName '<이 회차 작업 이름>'`);
+    console.error('⚠️ 게이트가 틀렸다고 판단되면 `--skip-gates` 로 넘길 수 있다. **그때는 이유를 log.md 에 남긴다.**');
+    process.exit(2);
+  }
+}
+
 // 타깃 격리: 한 플랫폼 실패가 다음 플랫폼 발행을 막지 않는다
 // (2026-07-22 팁2 사고: IG media_publish가 에러 응답 후 스크립트 중단 → 스레드 미발행.
 //  단, 실제론 IG 발행 성공 — 에러 시 재시도 전에 반드시 계정에서 발행 여부 확인할 것)
@@ -448,7 +598,7 @@ for (const target of targets) {
       const text = manifest.threadsText ?? (manifest.caption ?? '').slice(0, 500);
       r = await publishThreads({
         images: (manifest.images ?? []).slice(0, 20), text,
-        textOnly: manifest.threadsTextOnly === true, replies: manifest.threadsReplies,
+        textOnly: manifest.threadsTextOnly === true, replies: withBlogReply(manifest, account),
       }, token, args.dryRun, args.force);
     } else {
       throw new Error(`알 수 없는 target: ${target}`);
