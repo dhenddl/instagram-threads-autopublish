@@ -48,8 +48,13 @@ const BASE = {
 };
 const EXTRA = {
   REELS: 'ig_reels_avg_watch_time,ig_reels_video_view_total_time,reels_skip_rate',
-  CAROUSEL_ALBUM: 'profile_visits,follows',
-  IMAGE: 'profile_visits,follows',
+  // ★ views 는 2026-09-16 에 붙였다. ⛔ **기본 조합이 아니라 확장 자리에 넣었다** —
+  //   기본에 넣으면 미지원 표면에서 폴백까지 같이 죽어 그 회차가 통째로 조회 실패가 된다.
+  //   확장은 실패하면 기본으로 물러나고 `⚠️ 확장 지표 미지원` 을 찍는다.
+  //   🔬 CAROUSEL_ALBUM/FEED 에서 값이 나오는 걸 확인했다(media 17947277706321042 → views=1).
+  //      IMAGE 는 **안 재봤다** — 같은 이유로 확장 자리라 실패해도 안전하다.
+  CAROUSEL_ALBUM: 'views,profile_visits,follows',
+  IMAGE: 'views,profile_visits,follows',
 };
 
 // ★ API 는 timestamp 를 UTC(+0000) 로 준다 — check-threads-insights.mjs 와 같은 함정이다.
@@ -89,8 +94,12 @@ for (const m of mediaList.json.data) {
   const line = insights.json.data.map(i => `${i.name}=${i.values?.[0]?.value ?? i.total_value?.value}`).join(' · ');
   console.log(`  ${line}`);
   {
-    // 스냅샷용 수치 추출 — 캐러셀엔 views 가 없어 undefined 로 남고,
-    // JSON.stringify 가 키를 빼므로 check-settled 가 reach 를 지표로 고른다.
+    // 스냅샷용 수치 추출.
+    // ✏️ 2026-09-16 정정 — 여기 **「캐러셀엔 views 가 없어」** 라고 적혀 있었는데 **있다.**
+    //   우리가 안 물어봤을 뿐이다(위 EXTRA 참고). 🔬 그날 캐러셀 조회에서 views=1 이 나왔다.
+    //   ★ 「0 이 나와서 없다」가 아니라 **「안 물어봐서 없었다」** — 더 조용한 쪽이다.
+    //   ⚠️ 그래도 undefined 가 될 수 있다(확장 지표가 미지원으로 물러난 회차).
+    //   그때는 JSON.stringify 가 키를 빼므로 check-settled 가 reach 를 지표로 고른다.
     const num = (n) => {
       const i = insights.json.data.find((x) => x.name === n);
       return i ? Number(i.values?.[0]?.value ?? i.total_value?.value ?? NaN) : undefined;

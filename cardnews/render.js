@@ -1,5 +1,12 @@
-// slides.json -> 1080x1350 PNG 카드뉴스 렌더러
-// 사용법: node render.js [slides파일경로]   (기본: ./slides.json)
+// slides.json -> PNG 카드뉴스 렌더러
+// 사용법: node render.js [slides파일경로] [--story]   (기본: ./slides.json · 1080x1350)
+//
+// ★ --story 는 **1080x1920**(인스타 스토리·하이라이트 규격)으로 뽑는다. 2026-09-17 신설.
+//   왜: 하이라이트를 만들려면 스토리가 먼저 필요한데 **우리 스토리는 0건**이었고,
+//   1080x1920 을 뽑는 도구가 릴스 계열(make-termcast·make-reel-cover)에만 있었다.
+//   ⛔ 카드뉴스 기본 규격은 안 건드린다 — 발행분과 같은 그림이 나와야 한다.
+//   🔬 경쟁 계정 3곳(ai.trend.kr·lazy_owen·ai_margin_)이 전부 하이라이트를 퍼널로
+//      쓰고 있고 우리만 0개였다(2026-09-16 관찰).
 import { chromium } from "playwright";
 import { readFileSync, mkdirSync } from "node:fs";
 import { resolve, dirname } from "node:path";
@@ -8,14 +15,22 @@ import { loadTheme, rgba } from "./palette.mjs";
 import { inspect, report } from "./inspect.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const dataPath = resolve(__dirname, process.argv[2] ?? "slides.json");
+// ⛔ 플래그를 경로로 읽지 않는다 — `--story` 가 argv[2] 로 와도 slides 경로가 안 깨진다.
+const argv = process.argv.slice(2);
+const STORY = argv.includes("--story");
+const dataPath = resolve(__dirname, argv.find((a) => !a.startsWith("--")) ?? "slides.json");
 const data = JSON.parse(readFileSync(dataPath, "utf-8"));
 const { meta, slides } = data;
 
-const W = 1080, H = 1350;
+const W = 1080, H = STORY ? 1920 : 1350;
 
 const esc = (s) => s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-const ml = (s) => esc(s).replaceAll("\n", "<br>");
+// ★ 2026-09-18 — `**굵게**` 를 열었다. 그 전에는 줄바꿈만 처리해서 별표가 **화면에 그대로 나갔다.**
+//   ⛔ CSS 는 처음부터 `.body b, .accent { color: var(--accent) }` 로 준비돼 있었는데 **쓸 방법이 없었다.**
+//   🔬 회귀 위험 0 — 기존 덱(meta-one · no-face)은 `**` 가 **0쌍**이다(2026-09-18 전수).
+//   📌 CLAUDE.md 가 「카드뉴스의 볼드·숫자 강조는 의도된 장치」라고 적어뒀고,
+//      2026-09-16 벤치마킹의 공통문법 ②도 「강조 단어 하나에만 색」이다. 수단이 없으면 그 문법을 못 쓴다.
+const ml = (s) => esc(s).replaceAll("\n", "<br>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
 
 // 색·폰트는 palette.mjs가 단일 출처다. slides.json의 meta.palette / meta.fonts로
 // 덮어쓸 수 있고, 안 건드리면 기존 발행분과 같은 색이 나온다.
@@ -110,6 +125,15 @@ const css = `
   .tr.hi .c3 { color: var(--accent); }
   .tr.lo .c3 { color: var(--danger); }
   .note { margin-top: 34px; font-size: 30px; line-height: 1.5; color: var(--dim); }
+  /* image 타입 (2026-09-15 신설) — 실측 산출물(컨택트 시트·확대 프레임)을 그대로 보여준다.
+     ⛔ object-fit: contain 이다. cover 로 잘라내면 「증거를 보여준다」는 목적이 깨진다. */
+  /* ⛔ 배경을 #000 으로 두지 않는다 — 우리 실측 프레임은 대부분 검다. 검은 그림을 검은 통에
+     담으면 **어디까지가 그림인지 안 보인다**(2026-09-15 첫 시험에서 세로 그림이 꽉 찬 것처럼 보였다.
+     실제로는 contain 이 맞게 먹고 있었고 여백이 안 보였을 뿐이다). panel 로 두면 테두리가 읽힌다. */
+  .shot { margin-top: 36px; border: 1px solid var(--line); border-radius: 18px; overflow: hidden;
+          background: var(--panel); display: flex; align-items: center; justify-content: center; }
+  .shot img { width: 100%; max-height: 620px; object-fit: contain; display: block; }
+  .shotcap { margin-top: 18px; font-size: 27px; line-height: 1.45; color: var(--dim); }
 `;
 
 // 리텐션 곡선 SVG. points = [[시간%, 시청자%], ...]
@@ -194,6 +218,21 @@ function renderSlide(s, i, n) {
             <span class="c3">${esc(r.cells[2])}</span>
           </div>`).join("")}
       </div>
+      ${s.note ? `<div class="note">${ml(s.note)}</div>` : ""}
+      ${footer(s, i, n)}`;
+  } else if (s.type === "image") {
+    // 실측 산출물을 그대로 싣는다 (2026-09-15 신설).
+    // ⛔ setContent 로 띄우므로 base URL 이 없다 — 상대경로·file:// 는 안 붙는다.
+    //    그래서 **읽어서 data URI 로 박는다.** (파일이 없으면 여기서 죽는 게 맞다 —
+    //    빈 칸이 렌더돼서 「증거 슬라이드에 증거가 없는」 카드가 나가는 것보다 낫다.)
+    const p = resolve(__dirname, s.src);
+    const b64 = readFileSync(p).toString("base64");
+    const mime = s.src.toLowerCase().endsWith(".jpg") || s.src.toLowerCase().endsWith(".jpeg") ? "image/jpeg" : "image/png";
+    inner = `
+      <div class="kicker mono">${esc(s.kicker)}</div>
+      <h2>${ml(s.heading)}</h2>
+      <div class="shot"><img src="data:${mime};base64,${b64}" alt="${esc(s.alt ?? s.heading ?? "")}"></div>
+      ${s.caption ? `<div class="shotcap">${ml(s.caption)}</div>` : ""}
       ${s.note ? `<div class="note">${ml(s.note)}</div>` : ""}
       ${footer(s, i, n)}`;
   } else if (s.type === "cta") {
