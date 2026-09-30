@@ -215,7 +215,7 @@ for (const f of files) {
     console.log(`   허용: ${ALLOWED_HOSTS.join(' · ')}`);
     blocked++; continue;
   }
-  // ⛔ 2계정(@dhenddl_t)은 토스 쉐어링크 계정이다. 2026-08-28 에 정지 사고 뒤
+  // ⛔ 2계정(<2계정>)은 토스 쉐어링크 계정이다. 2026-08-28 에 정지 사고 뒤
   //   **링크 밀도를 낮춘** 계정이라 블로그 링크를 더 얹지 않는다.
   //   ★ 이 규칙은 여기 한 곳에만 둔다 — publish.mjs 에도 적으면 한 곳만 고쳐진다.
   if (String(m.account ?? 1) === '2') {

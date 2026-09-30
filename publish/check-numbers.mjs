@@ -35,13 +35,30 @@ const ROOT = path.resolve(HERE, '..', '..');
 const oi = process.argv.indexOf('--only');
 const ONLY = oi >= 0 && process.argv[oi + 1] ? path.basename(process.argv[oi + 1]) : null;
 
+// 볼트 위치: `--vault` > 환경변수 `VAULT_DIR` > 기본값(저장소 옆 `second-brain`).
+//   `VAULT_DIR` 은 2026-09-30 에 넣었다 — `publish.mjs` 는 게이트에 `--only` 만 넘겨서
+//   발행 경로에서는 `--vault` 를 줄 방법이 없었다. 환경변수는 자식 프로세스로 그대로 간다.
 const vi = process.argv.indexOf('--vault');
-const VAULT = vi >= 0 && process.argv[vi + 1]
-  ? path.resolve(process.cwd(), process.argv[vi + 1])
-  : path.join(ROOT, 'second-brain');
+const VAULT_ARG = vi >= 0 && process.argv[vi + 1] ? process.argv[vi + 1] : null;
+const VAULT = VAULT_ARG
+  ? path.resolve(process.cwd(), VAULT_ARG)
+  : process.env.VAULT_DIR
+    ? path.resolve(process.cwd(), process.env.VAULT_DIR)
+    : path.join(ROOT, 'second-brain');
 const WIKI = path.join(VAULT, 'wiki');
+const VAULT_DEFAULTED = !VAULT_ARG && !process.env.VAULT_DIR;
 
 // ⛔ 없는 경로에 조용히 빈 리포트를 내지 않는다 — 경로 오타와 「문제 없음」이 구분이 안 된다.
+// ✏️ 2026-09-30 예외 하나: **발행 경로(`--only`)에서 볼트를 아무도 지정하지 않았고 기본 자리에도 없을 때.**
+//   📌 왜: 공개 자료로 받은 저장소에는 볼트가 없다. 그대로면 이 게이트가 **매번 exit 1** 이고
+//     발행기는 그걸 「게이트가 막았다」로 찍어서, 받는 사람은 **자기 원고 문제로 오인했다.**
+//   ▶ 그 경우만 크게 경고하고 통과한다 — 대조할 대장이 없으니 막을 근거도 없다.
+//   ⛔ 사람이 손으로 돌릴 때(`--only` 없음)와 경로를 **지정했는데 없을 때**는 그대로 멈춘다.
+if (!existsSync(WIKI) && VAULT_DEFAULTED && ONLY) {
+  console.log(`⚠️ 볼트(wiki 폴더)가 없어 미검증 숫자 대조를 건너뛴다: ${WIKI}`);
+  console.log('   ▶ 대조하려면 환경변수 VAULT_DIR=<볼트경로> 를 주고 발행한다. 볼트 안에 wiki/ 가 있어야 한다.');
+  process.exit(0);
+}
 if (!existsSync(WIKI)) {
   console.error(`⛔ wiki 폴더가 없다: ${WIKI}`);
   console.error(`   --vault <볼트경로> 로 지정한다. 볼트 안에 wiki/ 가 있어야 한다.`);

@@ -1,7 +1,7 @@
 // check-insights.mjs — 최근 게시물 전체 인사이트 조회 (읽기 전용, 발행 없음)
 // 사용법: node check-insights.mjs
 
-import { readFileSync, appendFileSync } from 'node:fs';
+import { readFileSync, appendFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { loadEnv } from './env.mjs';
@@ -141,6 +141,8 @@ function target(m) {
 //    가짜 증가율이 된다. 그래서 전량을 읽은 뒤 한 번만 쓴다.
 if (!process.argv.includes('--no-snapshot')) {
   if (SNAP.length) {
+    // 2026-09-30: 공개 자료로 받은 저장소에는 logs/ 가 없다. 없으면 결과를 다 찍고 여기서 ENOENT 로 죽었다.
+    mkdirSync(join(HERE, 'logs'), { recursive: true });
     appendFileSync(join(HERE, 'logs', 'insight-snapshots.jsonl'),
       SNAP.map((r) => JSON.stringify(r)).join('\n') + '\n', 'utf-8');
     console.log(`\n📸 스냅샷 ${SNAP.length}건 저장 — 판정은 \`node check-settled.mjs\``);

@@ -13,7 +13,7 @@
 //    ★ publish.mjs:67 이 이미 같은 분기를 갖고 있었다 — 발행은 두 계정을 알았는데
 //      측정은 몰랐다. **같은 사실이 두 곳에 있으면 한 곳만 고쳐진다.**
 
-import { readFileSync, appendFileSync } from 'node:fs';
+import { readFileSync, appendFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { loadEnv } from './env.mjs';
@@ -53,7 +53,7 @@ const me = await api(`${TH_BASE}/me`, { fields: 'id,username', access_token: tok
 //    화면에는 계정 이름이 안 나온 것만 보여서 **토큰 문제인 줄 모른다.**
 //    ★ 조용한 실패보다 나쁜 건 엉뚱한 데서 시끄럽게 죽는 것이다.
 // ⛔⛔ **「토큰 문제」와 「계정 조치」를 갈라야 한다** (2026-08-27 실전).
-//   2계정 `@dhenddl_t` 가 개설 3일 만에 정지됐을 때 API 가 이렇게 답했다:
+//   2계정 `<2계정>` 가 개설 3일 만에 정지됐을 때 API 가 이렇게 답했다:
 //     code 190 · "You cannot access the app till you log in to www.threads.com
 //                 and follow the instructions given."
 //   ★ 이건 **토큰이 죽은 게 아니라 계정에 조치가 걸린 것**이다. 사람이 웹에서 풀어야 한다.
@@ -332,6 +332,8 @@ if (process.argv.includes('--replies')) {
 //    반쪽 측정은 다음 실행에서 「간격은 짧은데 값은 낮은」 가짜 증가율을 만든다.
 if (!process.argv.includes('--no-snapshot')) {
   if (SNAP.length) {
+    // 2026-09-30: 공개 자료로 받은 저장소에는 logs/ 가 없다. 없으면 결과를 다 찍고 여기서 ENOENT 로 죽었다.
+    mkdirSync(join(HERE, 'logs'), { recursive: true });
     appendFileSync(join(HERE, 'logs', 'insight-snapshots.jsonl'),
       SNAP.map((r) => JSON.stringify(r)).join('\n') + '\n', 'utf-8');
     console.log(`\n📸 스냅샷 ${SNAP.length}건 저장 — 판정은 \`node check-settled.mjs\``);
