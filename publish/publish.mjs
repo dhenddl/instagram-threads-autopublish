@@ -235,8 +235,20 @@ async function publishInstagram({ images, caption, alts, isAiGenerated }, token,
   const r = await publishOrVerify({
     target: 'instagram', label: 'IG', userId, token, text: caption,
     doPublish: async () => {
-      const { id } = await api('POST', `${IG_BASE}/${userId}/media_publish`, { creation_id: carouselId, access_token: token });
+      const res = await api('POST', `${IG_BASE}/${userId}/media_publish`, { creation_id: carouselId, access_token: token });
+      const { id } = res;
       console.log(`[IG] 🚀 발행 완료: media_id=${id}`);
+      // ── config_issue (2026-09-29 신설 · 사용자 지시) ─────────────────────
+      // 메타 changelog 2026-09-28: 발행은 성공했는데 요청 일부가 떨어지면 응답에 `config_issue` 가 붙는다
+      //   (`CAPTION_NOT_ATTACHED` 캡션 없이 게시 · `USER_TAGGING_FAILURE`). 전에는 `id` 만 꺼내서
+      //   **캡션(CTA·해시태그)이 빠져도 「발행 완료」로만 찍혔다.** — 브리핑 2026-09-29 3-1.
+      // ⛔ 실패로 만들지 않는다 — 이미 게시됐다. 여기서 던지면 재발행을 부른다(07-22·08-04 중복 게시 사고).
+      //   보이게만 한다: 아래 표지(`CONFIG_ISSUE`)를 check-ready.ps1 이 최근 36h 로그에서 찾아 찍는다.
+      // ⚠️ 모양(문자열·객체·배열)을 원문이 못 박지 않아서 그대로 직렬화한다.
+      if (res && res.config_issue != null) {
+        console.error(`[IG] ⚠️ CONFIG_ISSUE 발행은 됐지만 요청 일부가 떨어졌다: ${JSON.stringify(res.config_issue)}`);
+        console.error('[IG]    ▶ 앱에서 게시물 캡션·태그를 눈으로 확인한다. 캡션만 빠졌으면 앱에서 캡션을 수정해 붙인다. ⛔ 재발행하지 않는다.');
+      }
       return { id };
     },
   });

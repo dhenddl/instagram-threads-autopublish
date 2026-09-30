@@ -60,7 +60,9 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 // ⛔ `account === 2` 를 신호로 쓰지 않는다. 2계정에도 **무링크 회차**가 있다
 //    (2026-08-28 사용자 결정으로 t-11·16·17·20·25 에서 링크를 뺐다).
 //    「2계정이니까 광고」로 잡으면 그 다섯 편이 매번 걸린다 — 게이트가 아니라 소음이다.
-const ISSUED_LINK = /https?:\/\/toss\.im\/_m\/[A-Za-z0-9]+/;
+// ✏️ 2026-09-28 — 발급 도메인이 둘이다(`toss.im/_m/` · `toss.shopping/_m/`). 근거는 check-toss.mjs 의 ISSUED 주석.
+//   ⛔ 한쪽만 알면 새 도메인 회차가 「제휴 아님」으로 읽혀 이 게이트가 조용히 빠진다.
+const ISSUED_LINK = /https?:\/\/toss\.(?:im|shopping)\/_m\/[A-Za-z0-9]+/;
 const DISCLOSURE = /쉐어링크\s*활동의?\s*일환|수수료를?\s*제공받/;
 
 // ── 가상인물 후보 신호 ─────────────────────────────────────────

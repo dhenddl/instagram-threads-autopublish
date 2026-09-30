@@ -124,7 +124,7 @@ for (const f of readdirSync(HERE).filter((x) => /^post-.*\.json$/.test(x) && (!O
   try { j = JSON.parse(readFileSync(path.join(HERE, f), 'utf8')); } catch { continue; }
   const push = (surface, v) => {
     const t = flat(v);
-    if (t.trim()) rows.push({ file: f, surface, text: t });
+    if (t.trim()) rows.push({ file: f, surface, text: t, date: j.publishDate ?? null });
   };
   push('릴스 캡션', j.caption);
   push('스레드 본문', j.threadsText ?? j.threadsTextOnly);
@@ -159,6 +159,12 @@ if (ONLY && !rows.length) {
 const blocked = [];
 const warned = [];
 
+// 이미 나간 회차는 해시태그 경고에서 뺀다 (아래 「인스타 캡션 해시태그」 절 참조).
+// ⚠️ 어미 연속·숫자 0개 판정에는 **안 쓴다** — 그 둘은 종전 범위를 그대로 둔다.
+const TODAY = new Date().toISOString().slice(0, 10);
+const isPast = (d) => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d) && d < TODAY;
+const 지나간회차 = [];
+
 for (const r of rows) {
   for (const run of endingRuns(r.text)) {
     const where = `${r.surface} (${r.file})`;
@@ -167,6 +173,40 @@ for (const r of rows) {
   }
   if (NUM_SURFACES.has(r.surface) && numCount(r.text) === 0) {
     warned.push({ where: `${r.surface} (${r.file})`, why: '숫자·날짜 0개 — 0절 채우기 1항목 비었음', sents: [] });
+  }
+
+  // ── ⚠️ 인스타 캡션에 해시태그가 0개 (2026-09-21 신설 — 사용자 지시) ──────────
+  //   📌 왜 생겼나: 2026-09-21 에 `week11`·`week12` **10편의 캡션에 태그가 0개**인 걸 찾았다.
+  //      ⛔ **회귀가 아니라 누락이다.** 깃 이력으로 보면 매니페스트는 **생성 시점에 늘 태그 0**
+  //         이고(`week10` 도 그랬다), **나중에 사람이 캡션을 쓰면서 넣는다**
+  //         (`b20520f` 「릴스 인스타 캡션 3편 — 사용자 지시」). 서로 다른 날 다른 커밋으로 생긴
+  //         `week11`(09-15)·`week12`(09-18)이 **같은 상태로 태어났다** — 범인인 변경이 없다.
+  //      ⇒ 「태그 5개」 규격이 **코드에도 게이트에도 없고 사람 기억에만 있었다.** 그래서 빠졌다.
+  //      ✏️ 처음엔 「09-16 캡션 틀 교체 때 딸려 빠졌다」로 적었는데 **틀렸다** — 그 변경은 하루 뒤다.
+  //
+  //   ⛔ **차단하지 않는다.** 태그 누락으로 19:00 이 멈추면 게이트가 아니라 사고다 —
+  //      이 파일 머리말이 숫자 0개를 차단 안 한 이유와 같다.
+  //   ⛔ **개수 하한을 두지 않는다**(「3개 미만」 같은 것). 실측 근거가 없고,
+  //      목록을 늘리면 `no-ai-tell` 3-1절(신호 부패)이 금지한 자리로 간다. **0 개만 본다.**
+  //   ⛔ **이미 나간 회차는 안 문다.** 인스타 캡션은 발행 뒤 수정이 사실상 불가고,
+  //      못 고치는 걸 계속 물면 **영구 red** 가 된다(`check-rank-claims` 와 같은 규약).
+  //      ⚠️ 건너뛴 건수는 **화면에 남긴다** — 조용히 자르면 「전부 통과」로 읽힌다.
+  //   🔬 2026-09-21 실측(복원 뒤): 캡션 있는 회차 **58건 중 태그 있음 57 · 0개 1**,
+  //      그 1건이 `post-signal-decay`(08-15 발행분)이라 **오늘 이후 회차에서는 0번 걸린다.**
+  //      ★ **지금은 한 번도 안 뜬다. 그게 정상이다** — `check-virtual-person` 과 같은 계열로
+  //        회귀를 위해 미리 걸어둔 것이다.
+  if (r.surface === '릴스 캡션') {
+    // ⛔ `stripDeco` 를 쓰지 않는다 — 그게 하는 일이 **해시태그를 지우는 것**이라 늘 0 이 나온다.
+    //    (2026-09-21 에 실제로 그렇게 썼다가 양성 대조군에서 잡혔다.) 원문을 그대로 센다.
+    const 태그 = (r.text.match(/(?<![\w가-힣])#[^\s#]+/g) ?? []).length;
+    if (태그 === 0) {
+      if (isPast(r.date)) 지나간회차.push(`${r.file} (${r.date})`);
+      else warned.push({
+        where: `${r.surface} (${r.file})`,
+        why: '인스타 캡션에 해시태그 0개 — 옛 회차는 「주제 3 + #개발자부업 + #무인수익실험」 5개였다',
+        sents: [],
+      });
+    }
   }
 }
 
@@ -206,6 +246,12 @@ if (총문장) {
     if (v.n) console.log(`      ${표면} ${v.m}/${v.n} (${비율(v.m, v.n)})`);
   }
   console.log('   ⚠️ 아래 결과를 「연속이 없다」가 아니라 「못 읽은 몫을 빼고 없다」로 읽는다.');
+}
+
+// ⚠️ 조용히 자르지 않는다 — 건너뛴 건수를 화면에 남긴다(`check-rank-claims` 와 같은 규약).
+if (지나간회차.length) {
+  console.log(`   해시태그 0개인데 **이미 나간 회차**라 안 문 것 ${지나간회차.length}건: ${지나간회차.join(' · ')}`);
+  console.log('   ▶ 발행 뒤 인스타 캡션은 고치기 어렵다. 이건 게이트가 아니라 다음 회차의 소재다.');
 }
 
 if (warned.length) {

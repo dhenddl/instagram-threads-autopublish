@@ -23,7 +23,7 @@
 //
 // ⚠️ 6. 금지 카테고리(의료기기·분유·건강기능식품) — 경고만. 사람이 판단한다.
 //
-// ★ 화이트리스트로 간다: 통과는 `toss.im/_m/{코드}` 뿐이다.
+// ★ 화이트리스트로 간다: 통과는 `toss.im/_m/{코드}` · `toss.shopping/_m/{코드}` 뿐이다(후자 2026-09-28 추가).
 //   막을 대상이 「유출·오류」면 새 항목이 기본 차단이어야 한다.
 //   그 덕에 일반 공유 링크 형태를 몰라도 게이트가 성립한다.
 //
@@ -39,7 +39,15 @@ const LEDGER = join(HERE, 'toss-links.json');
 
 // ✅ 유일하게 통과하는 형태. 실측: https://toss.im/_m/<8자 코드> (2026-08-25 사용자 제공)
 //   ⚠️ 실제 코드는 지우고 자리표시로 두었다 — 이 파일은 공개 자료로 나간다(2026-09-08).
-const ISSUED = /https?:\/\/toss\.im\/_m\/[A-Za-z0-9]+/g;
+// ✏️ 2026-09-28 — 발급 도메인이 하나 더 생겼다: `https://toss.shopping/_m/<코드>`.
+//   그날 사용자가 붙인 15건 중 14건이 이 모양이었다.
+//   🔬 두 모양 다 **같은 자리로 302** 한다: `toss.shopping/t/<상품번호>?k=…&referrer=affiliate`.
+//      `toss.shopping` 루트는 `toss.im` 으로 307 — 토스 자기 도메인이다.
+//   ▶ 그래서 화이트리스트에 **도메인만** 하나 더 넣었다. `_m/` 경로 규칙은 그대로다.
+//   ⛔ `toss.shopping/t/…`(열린 상품 페이지)는 여전히 막힌다 — 발급 링크가 아니라 도착지다.
+const ISSUED_HOST = String.raw`toss\.(?:im|shopping)\/_m\/`;
+const ISSUED = new RegExp(String.raw`https?:\/\/` + ISSUED_HOST + '[A-Za-z0-9]+', 'g');
+const ISSUED_AT = new RegExp(String.raw`https?:\/\/` + ISSUED_HOST);
 // ⛔ 알림톡이 보내주는 상품 페이지 링크. 발급된 링크가 아니다.
 const NOTIFY = /https?:\/\/sharelink\.toss\.im\/links\/products\/\d+/g;
 // 그 외 토스 도메인 링크 — 화이트리스트에 없으므로 전부 잡는다
@@ -84,14 +92,14 @@ function auditLedger(l) {
   const rounds = new Map();
   for (const [i, e] of (l.links ?? []).entries()) {
     const txt = String(e['원문'] ?? '');
-    const m = txt.match(/https:\/\/toss\.im\/_m\/(\S+)/);
+    const m = txt.match(new RegExp('https:\\/\\/' + ISSUED_HOST + '(\\S+)'));
     const label = `대장 ${i + 1}번(${(txt.split('\n')[1] ?? '?').slice(0, 20)})`;
     if (!m) { out.push(`⛔ ${label}: 발급 링크가 없다`); continue; }
     const code = m[1];
     codes.push(code);
     if (!/^[A-Za-z0-9]+$/.test(code)) out.push(`⛔ ${label}: 코드에 쓸 수 없는 문자가 있다 (${code})`);
     if (!/토스쇼핑\s*쉐어링크\s*활동의?\s*일환/.test(txt)) out.push(`⛔ ${label}: 고시문구가 없다`);
-    if (txt.indexOf('https://toss.im/_m/') < txt.search(/토스쇼핑\s*쉐어링크/)) out.push(`⛔ ${label}: 링크가 고시문구보다 위다`);
+    if (txt.search(ISSUED_AT) < txt.search(/토스쇼핑\s*쉐어링크/)) out.push(`⛔ ${label}: 링크가 고시문구보다 위다`);
 
     // ⚠️ 규약 A (2026-08-26): 발급일은 「발급한 날」이라 미래일 수 없다.
     //    초판이 배정일을 이 칸에 적어 미래 날짜가 들어갔고, 다음 세션이 그걸 발급일로 읽었다.
@@ -189,16 +197,16 @@ for (const f of files) {
 
   // ⛔ 화이트리스트 밖의 토스 링크
   for (const u of anyToss) {
-    if (/^https?:\/\/toss\.im\/_m\//.test(u)) continue;
+    if (new RegExp('^' + ISSUED_AT.source).test(u)) continue;
     if (NOTIFY.test(u)) { NOTIFY.lastIndex = 0; continue; }  // 위에서 이미 잡았다
     NOTIFY.lastIndex = 0;
-    errs.push(`화이트리스트 밖의 토스 링크: ${u}  (통과는 toss.im/_m/… 뿐이다)`);
+    errs.push(`화이트리스트 밖의 토스 링크: ${u}  (통과는 toss.im/_m/… · toss.shopping/_m/… 뿐이다)`);
   }
 
   if (hasIssued) {
     // ⛔ 2·3. 고시문구 유무와 위치 — 링크가 있는 **그 조각 안**에서 본다
     for (const part of parts) {
-      const idxLink = part.text.search(/https?:\/\/toss\.im\/_m\//);
+      const idxLink = part.text.search(ISSUED_AT);
       if (idxLink < 0) continue;
       const hasDisc = DISCLOSURE.test(part.text) && FEE_WORD.test(part.text);
       if (!hasDisc) {

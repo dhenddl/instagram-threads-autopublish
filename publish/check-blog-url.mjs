@@ -1,4 +1,5 @@
-// check-blog-url.mjs — 매니페스트의 `blogUrl` 이 **살아 있는 주소인가** (발행 직전 게이트)
+// check-blog-url.mjs — 우리 블로그 링크가 **살아 있는 주소인가** (발행 직전 게이트)
+//   보는 자리 둘: ① `blogUrl` 필드  ② 본문·답글·캡션 텍스트 (2026-09-22 확장 — 사용자 지시)
 //
 // ── 왜 만들었나 (2026-08-31) ──────────────────────────────────────
 // 「블로그 방문자 유입 특단 조치 (2026-08-30)」 관 ①.
@@ -83,13 +84,112 @@ async function probe(url) {
   return { err: '알 수 없음' };
 }
 
-let blocked = 0, warned = 0, scanned = 0, touched = 0;
+// ── 본문·답글·캡션 속 블로그 링크도 본다 (2026-09-22 신설 — 사용자 지시) ──────
+// 📌 왜: 2026-09-21 사용자 결정으로 E(블로그 유도) 회차는 **본문에 링크를 둘 수 있게** 됐다.
+//   그런데 이 게이트는 `blogUrl` **필드만** 읽어서 **본문에 넣은 링크는 아무도 안 봤다.**
+//   🔬 2026-09-22 에 실제로 그랬다 — 10/03 회차 본문에 링크를 넣었는데
+//      이 게이트가 「blogUrl 있는 회차 0개」를 찍고 통과시켰다. **빈 자리와 구분이 안 됐다.**
+//
+// ⛔⛔ **우리 블로그 호스트만 뽑는다.** 발행 텍스트에 toss.im 링크가 **74건** 있다(2026-09-22 실측).
+//   전부 긁으면 매 발행마다 남의 도메인을 때리고 **토스 404 하나로 그날 글이 안 나간다.**
+//   토스 링크의 모양·고시문구·계정 분리는 `check-toss` 가 따로 본다. **축이 다르다.**
+//
+// 🔬 신설 시점 영향 측정: 우리 블로그 링크가 본문에 있는 회차 **5건**
+//   (지나간 4건 = `/notice/18` · 앞으로 1건 = 10/03 `/26`). **둘 다 HTTP 200 확인.**
+//   ▶ **이미 나간 회차를 막지 않는다** — 볼트가 2026-08-28 에 정한 선이다.
+const URL_RE = /https?:\/\/[^\s<>"')\]]+/g;
+
+function bodyUrls(m) {
+  const surfaces = [['캡션', m.caption], ['본문', m.threadsText]];
+  if (Array.isArray(m.threadsReplies)) {
+    m.threadsReplies.forEach((r, i) => surfaces.push([`답글${i + 1}`, r]));
+  }
+  const seen = new Map();
+  for (const [where, text] of surfaces) {
+    if (typeof text !== 'string') continue;
+    for (const raw of text.match(URL_RE) ?? []) {
+      const u = raw.replace(/[.,)]+$/, '');   // 문장 끝 구두점이 딸려온다
+      let host;
+      try { host = new URL(u).hostname; } catch { continue; }
+      if (!ALLOWED_HOSTS.includes(host)) continue;
+      if (!seen.has(u)) seen.set(u, where);
+    }
+  }
+  return [...seen.entries()].map(([url, where]) => ({ url, where }));
+}
+
+// ⛔ 같은 주소를 회차마다 다시 묻지 않는다. 전량 검사에서 같은 링크가 여러 회차에 걸린다.
+const PROBE_CACHE = new Map();
+async function probeCached(url) {
+  if (PROBE_CACHE.has(url)) return PROBE_CACHE.get(url);
+  let r = await probe(url);
+  if (r.err) r = await probe(url);   // 한 번만 다시. 순간 장애를 실패로 굳히지 않는다.
+  PROBE_CACHE.set(url, r);
+  return r;
+}
+
+// ★★ 네트워크 판정은 **이 함수 하나**다. blogUrl 경로와 본문 경로가 같은 규약을 쓴다.
+//   ⛔ 두 곳에 적으면 한 곳만 고쳐진다 — 이 볼트가 반복해서 데인 자리다.
+//   돌려주는 값: 'block' | 'warn' | 'ok'
+async function netVerdict(tag, url) {
+  const r = await probeCached(url);
+  if (r.err) {
+    console.log(`⚠️ ${tag}\n   못 물어봤다 (${r.err}) — ${url}`);
+    console.log('   ⛔ 「링크가 죽었다」가 아니다. **막지 않는다.** 발행 후 눈으로 한 번 확인할 것.');
+    return 'warn';
+  }
+  if ([404, 410, 403].includes(r.status)) {
+    console.log(`⛔ ${tag}\n   HTTP ${r.status} — 주소가 죽었거나 비공개다: ${url}`);
+    return 'block';
+  }
+  if (r.status >= 500) {
+    console.log(`⚠️ ${tag}\n   HTTP ${r.status} (서버 쪽) — ${url}`);
+    console.log('   ⛔ 우리 원고 문제가 아니다. **막지 않는다.**');
+    return 'warn';
+  }
+  if (r.status >= 400) {
+    console.log(`⛔ ${tag}\n   HTTP ${r.status} — ${url}`);
+    return 'block';
+  }
+  const moved = r.finalUrl && r.finalUrl.replace(/\/$/, '') !== url.replace(/\/$/, '');
+  console.log(`✅ ${tag}  HTTP ${r.status}  ${url}${moved ? `\n   ↪ 최종: ${r.finalUrl}` : ''}`);
+  return 'ok';
+}
+
+let blocked = 0, warned = 0, scanned = 0, touched = 0, bodyTouched = 0;
 
 for (const f of files) {
   const p = join(HERE, basename(f));
   let m;
   try { m = JSON.parse(readFileSync(p, 'utf8')); } catch { console.log(`⛔ JSON 파싱 실패: ${f}`); blocked++; continue; }
   scanned++;
+
+  // ── 본문·답글·캡션 속 블로그 링크 (blogUrl 필드와 **별개로** 본다) ──────
+  // ⛔ blogUrl 이 없는 회차도 여기를 지난다. 예전엔 `if (b === null) continue` 가
+  //   본문 검사까지 같이 건너뛰었고, 그게 2026-09-22 의 공백이었다.
+  const inBody = bodyUrls(m);
+  if (inBody.length) {
+    bodyTouched++;
+    for (const { url, where } of inBody) {
+      const tag = `${f} [${where}]`;
+      let u2;
+      try { u2 = new URL(url); } catch {
+        console.log(`⛔ ${tag}\n   URL 로 못 읽는다: ${url}`); blocked++; continue;
+      }
+      if (u2.protocol !== 'https:') {
+        console.log(`⛔ ${tag}\n   https 가 아니다: ${url}`); blocked++; continue;
+      }
+      // ⛔ 2계정은 토스 링크만 단다 (2026-08-28 링크 밀도 조정). blogUrl 규칙과 같은 선이다.
+      if (String(m.account ?? 1) === '2') {
+        console.log(`⛔ ${tag}\n   2계정 회차 본문에 블로그 링크가 있다. 블로그 링크는 **본계정만** 단다.`);
+        blocked++; continue;
+      }
+      if (OFFLINE) { console.log(`✅ ${tag}  ${url}  (모양만 — --offline)`); continue; }
+      const v = await netVerdict(tag, url);
+      if (v === 'block') blocked++;
+      else if (v === 'warn') warned++;
+    }
+  }
 
   const b = urlOf(m);
   if (b === null) continue;              // blogUrl 없는 회차는 이 게이트와 무관하다
@@ -126,33 +226,13 @@ for (const f of files) {
 
   if (OFFLINE) { console.log(`✅ ${f}  ${b.url}  (모양만 — --offline)`); continue; }
 
-  // ── 네트워크 판정 ─────────────────────────────────────────────
-  let r = await probe(b.url);
-  if (r.err) r = await probe(b.url);     // 한 번만 다시. 순간 장애를 실패로 굳히지 않는다.
-
-  if (r.err) {
-    console.log(`⚠️ ${f}\n   못 물어봤다 (${r.err}) — ${b.url}`);
-    console.log('   ⛔ 「링크가 죽었다」가 아니다. **막지 않는다.** 발행 후 눈으로 한 번 확인할 것.');
-    warned++; continue;
-  }
-  if ([404, 410, 403].includes(r.status)) {
-    console.log(`⛔ ${f}\n   HTTP ${r.status} — 주소가 죽었거나 비공개다: ${b.url}`);
-    blocked++; continue;
-  }
-  if (r.status >= 500) {
-    console.log(`⚠️ ${f}\n   HTTP ${r.status} (서버 쪽) — ${b.url}`);
-    console.log('   ⛔ 우리 원고 문제가 아니다. **막지 않는다.**');
-    warned++; continue;
-  }
-  if (r.status >= 400) {
-    console.log(`⛔ ${f}\n   HTTP ${r.status} — ${b.url}`);
-    blocked++; continue;
-  }
-  const moved = r.finalUrl && r.finalUrl.replace(/\/$/, '') !== b.url.replace(/\/$/, '');
-  console.log(`✅ ${f}  HTTP ${r.status}  ${b.url}${moved ? `\n   ↪ 최종: ${r.finalUrl}` : ''}`);
+  // ── 네트워크 판정 — 규약은 netVerdict 한 곳에만 있다 ──────────
+  const v = await netVerdict(f, b.url);
+  if (v === 'block') { blocked++; continue; }
+  if (v === 'warn') { warned++; continue; }
 }
 
-console.log(`\n매니페스트 ${scanned}개 검사 · blogUrl 있는 회차 ${touched}개`);
+console.log(`\n매니페스트 ${scanned}개 검사 · blogUrl 필드 ${touched}개 · 본문에 블로그 링크 ${bodyTouched}개`);
 if (blocked) {
   console.log(`⛔ 차단 ${blocked}건${warned ? ` · 경고 ${warned}건` : ''}`);
   process.exit(1);
