@@ -98,7 +98,7 @@ async function renderIntro(coverJson, framesDir, speed) {
 *{margin:0;padding:0;box-sizing:border-box;}
 :root{--bg:#0d1117;--panel:#161b22;--line:#30363d;--text:#e6edf3;--dim:#9aa4b2;--accent:#3fb950;--accent-dim:#238636;}
 html,body{width:${W}px;height:${H}px;background:#0d1117;overflow:hidden;}
-body{font-family:'Pretendard Variable',Pretendard,'Noto Sans KR','Malgun Gothic',sans-serif;}
+body{font-family:'Noto Sans KR','Malgun Gothic',sans-serif;}
 .stage{width:${W}px;height:${H}px;display:flex;align-items:center;justify-content:center;background:#0d1117;}
 .mono{font-family:'Cascadia Code','D2Coding',Consolas,monospace;}
 .card{width:1080px;height:1350px;background:var(--bg);color:var(--text);position:relative;overflow:hidden;display:flex;flex-direction:column;transform-origin:center;will-change:transform;}

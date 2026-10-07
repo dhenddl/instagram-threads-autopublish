@@ -83,7 +83,7 @@ console.log("shot: 04-slides-json.png");
 const statCard = `<!doctype html><html><head><meta charset="utf-8"><style>
   * { margin:0; box-sizing:border-box; }
   body { width:1080px; height:1350px; background:#0d1117; color:#e6edf3; display:flex; flex-direction:column;
-         justify-content:center; padding:96px; font-family:'Pretendard Variable',Pretendard,'Malgun Gothic',sans-serif; }
+         justify-content:center; padding:96px; font-family:'Malgun Gothic',sans-serif; }   /* 2026-10-07: Pretendard 는 설치된 적 없어 지금까지 맑은 고딕으로 그려졌다 — 그 모양 그대로 둔다(브랜드 기본은 palette 의 Noto Sans KR) */
   .mono { font-family:'Cascadia Code','D2Coding',Consolas,monospace; }
   .date { color:#3fb950; font-size:34px; margin-bottom:28px; }
   h1 { font-size:84px; font-weight:800; margin-bottom:20px; }
