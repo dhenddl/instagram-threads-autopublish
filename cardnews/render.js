@@ -11,7 +11,7 @@ import { chromium } from "playwright";
 import { readFileSync, mkdirSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadTheme, rgba } from "./palette.mjs";
+import { loadTheme, rgba, assertFontsResolve } from "./palette.mjs";
 import { inspect, report } from "./inspect.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -261,6 +261,7 @@ mkdirSync(outDir, { recursive: true });
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
 await page.setContent(html, { waitUntil: "networkidle" });
+await assertFontsResolve(page, fonts);   // 글꼴 검사 (2026-10-07) — 스택 첫 글꼴이 대체로 빠지면 멈춘다(palette.mjs assertFontsResolve)
 
 // ── 자기검사 ──────────────────────────────────────────────────────────
 // 스크린샷 **전에** 잰다(레이아웃은 이미 확정됐고, 결과를 먼저 봐야 한다).

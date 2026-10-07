@@ -12,6 +12,7 @@ import { spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync, mkdirSync, rmSync, existsSync } from 'node:fs';
 import { resolve, dirname, join, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assertFontsResolve, DEFAULT_FONTS } from './palette.mjs';
 import { tryWriteReelCaption, readPublishDate, drivePathFor, captionSidecars } from './reel-caption.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -166,6 +167,7 @@ window.frame(0);
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
   await page.setContent(html, { waitUntil: 'networkidle' });
+  await assertFontsResolve(page, DEFAULT_FONTS);   // 글꼴 검사 (2026-10-07) — 스택 첫 글꼴이 대체로 빠지면 멈춘다(palette.mjs assertFontsResolve) · 아래 HTML 의 스택이 DEFAULT_FONTS 와 같다
   for (let f = 0; f < nFrames; f++) {
     await page.evaluate((tt) => window.frame(tt), (f / FPS) * 1000);
     await page.screenshot({ path: join(framesDir, `f-${String(f).padStart(5, '0')}.png`) });
