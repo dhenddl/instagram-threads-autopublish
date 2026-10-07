@@ -213,6 +213,39 @@ for (const r of rows) {
 const scope = ONLY ? `--only ${ONLY}` : `전수 ${new Set(rows.map((r) => r.file)).size}회차`;
 console.log(`AI 티 게이트 — ${scope} · 표면 ${rows.length}건`);
 
+// ── 📊 `--all` 에서만: 표면별 **최장 연속** 분포 (2026-10-02 추가 · 릴스 세션) ──────────
+//   왜: 머리말의 「268건 분포(1연속 208 · 2연속 59 · 3연속 1)」는 9/03 에 손으로 센 값이고
+//       다시 재는 코드가 없었다. 10/20 캐러셀 ②(어미 축)가 이 분포를 화면 글자로 쓰는데
+//       「재지 않은 값은 원고에 안 넣는다」(후보 풀 §5) — 그래서 재는 자리를 게이트 안에 둔다.
+//   ⛔ 판정에는 안 쓴다. 숫자만 찍는다. `--only`(발행 경로)에서는 안 돈다 — 출력이 길어지면 아무도 안 읽는다.
+//   🔬 2026-10-02 실측: 표면 497건 — 1연속 393 · 2연속 103 · 3연속 1 · 4연속 이상 0 (9/03 과 같은 모양).
+//      2연속의 어미는 「습니다」57 · 「니다」31 — 존댓말 서술체 자체다. 미포착 31.4% 는 위 절대로 깎인 값.
+if (ALL) {
+  const hist = new Map();   // surface -> {1:n, 2:n, 3:n, '4+':n}
+  const longestEnding = new Map();
+  for (const r of rows) {
+    const endings = sentencesOf(r.text).map(endingOf);
+    let best = 0, bestE = '', i = 0;
+    while (i < endings.length) {
+      const e = endings[i];
+      if (!e) { i += 1; continue; }
+      let j = i; while (j < endings.length && endings[j] === e) j += 1;
+      if (j - i > best) { best = j - i; bestE = e; }
+      i = j;
+    }
+    const k = best >= 4 ? '4+' : String(best);
+    const h = hist.get(r.surface) ?? { 1: 0, 2: 0, 3: 0, '4+': 0, 0: 0 };
+    h[k] = (h[k] ?? 0) + 1; hist.set(r.surface, h);
+    if (best >= 2) longestEnding.set(bestE, (longestEnding.get(bestE) ?? 0) + 1);
+  }
+  const tot = { 0: 0, 1: 0, 2: 0, 3: 0, '4+': 0 };
+  for (const h of hist.values()) for (const k of Object.keys(tot)) tot[k] += h[k] ?? 0;
+  console.log(`   📊 최장 연속 분포(표면별 1건씩) — 전체: 1연속 ${tot[1]} · 2연속 ${tot[2]} · 3연속 ${tot[3]} · 4연속 이상 ${tot['4+']}${tot[0] ? ` · 어미 못 잡음 ${tot[0]}` : ''}`);
+  for (const [s, h] of hist) console.log(`      ${s} — 1연속 ${h[1]} · 2연속 ${h[2]} · 3연속 ${h[3]} · 4연속 이상 ${h['4+']}${h[0] ? ` · 어미 못 잡음 ${h[0]}` : ''}`);
+  const top = [...longestEnding].sort((a, b) => b[1] - a[1]).map(([e, n]) => `「${e}」${n}`).join(' · ');
+  if (top) console.log(`      2연속 이상이 난 자리의 어미: ${top}`);
+}
+
 // ── ⚠️ 이 검사가 **못 읽은 양**을 같이 찍는다 (2026-09-21 추가) ──────────────
 //   왜: `endingOf` 가 어미를 못 잡으면 `endingRuns` 가 **그 자리에서 연속을 끊는다**.
 //       그래서 못 읽은 문장은 「안 걸린 것」이 아니라 **「연속을 숨긴 것」**이다.

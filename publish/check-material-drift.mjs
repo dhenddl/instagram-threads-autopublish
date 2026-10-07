@@ -28,6 +28,15 @@
 //
 // 사용: node check-material-drift.mjs --only post-reels-graph.json
 //       node check-material-drift.mjs --all        (선언된 회차 전부)
+//       node check-material-drift.mjs --public     (회차와 무관하게 repo 가 있는 자료 전부 — 상시 점검)
+//
+// ── --public (2026-10-02 신설 — 사용자 지시 「공개 자료 점검은 경고로 넣어」) ──────────
+// ⛔⛔ 배포 회차 **사이의** 공개본은 아무도 안 봤다. 🔬 3호 공개본은 9/30 커밋부터 10/02 재배포까지
+//   `lint-links` 가 index 대조에 실패한 채 받을 수 있었다(lint 12차 4절). 이 검사는 선언된 회차에만
+//   돌아서 신호가 없었다.
+// ▶ 그래서 `check-ready`(08:00)가 이 모드로 **매일** 부른다. 판정은 같고 **쓰는 쪽이 경고로만** 다룬다 —
+//   발행 게이트(`--only`)는 그대로다. ⛔ 이 모드를 발행 경로에 걸지 않는다(자료와 무관한 회차가 막힌다).
+// ⚠️ 비용: pipeline 에서 자료 파일을 고칠 때마다 다음 날 아침 경고가 뜬다 — 재내보내기 전까지 계속.
 
 import { readFileSync, readdirSync, existsSync, mkdtempSync, mkdirSync, rmSync, copyFileSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -57,6 +66,7 @@ const argv = process.argv.slice(2);
 const oi = argv.indexOf('--only');
 const only = oi >= 0 ? argv[oi + 1] : '';
 const all = argv.includes('--all');
+const pub = argv.includes('--public');
 
 let mats = [];
 try {
@@ -66,9 +76,11 @@ try {
   process.exit(0);
 }
 
-const manifests = only
-  ? [only]
-  : readdirSync(HERE).filter((f) => f.startsWith('post-') && f.endsWith('.json'));
+const manifests = pub
+  ? []
+  : only
+    ? [only]
+    : readdirSync(HERE).filter((f) => f.startsWith('post-') && f.endsWith('.json'));
 
 // ── 이 회차가 자료 배포 회차인가 ────────────────────────────────
 const declared = [];        // [{ manifest, id }]
@@ -86,6 +98,9 @@ for (const { manifest, id, date } of dateOnly) {
   console.log(`⚠️ ${manifest} 의 발행일(${date})이 자료 ${id} 배포일과 같은데 \`"material": "${id}"\` 선언이 없다.`);
   console.log('   ▶ 배포 회차라면 매니페스트에 그 키를 넣어라. 이 검사는 선언된 회차만 본다.');
 }
+
+// --public: 회차가 아니라 공개 리포가 있는 자료 전부를 「선언된 것」처럼 본다
+if (pub) for (const mat of mats) if (mat.repo) declared.push({ manifest: '(공개본 상시 점검)', id: mat.id });
 
 if (!declared.length) {
   console.log(only ? `✅ ${only} — 자료 배포 회차가 아니다 (material 선언 없음)` : '✅ 선언된 자료 배포 회차 없음');
@@ -138,7 +153,7 @@ for (const { manifest, id } of declared) {
 if (!막힘.length) process.exit(0);
 
 console.log('');
-console.log('⛔⛔ 자료 배포 회차인데 **공개 리포가 낡았다.**');
+console.log(pub ? '⚠️ 공개 리포가 지금 코드보다 낡았다 — 받는 사람은 이 판을 받는다.' : '⛔⛔ 자료 배포 회차인데 **공개 리포가 낡았다.**');
 for (const { manifest, id, repo, changed, added } of 막힘) {
   console.log(`\n──── ${manifest} → 자료 ${id} · github.com/${OWNER}/${repo}`);
   for (const f of changed) console.log(`   M ${f}`);

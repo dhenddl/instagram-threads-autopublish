@@ -44,7 +44,7 @@ node render.js day-1.json        # 다른 회차 파일 지정
 - [ ] meta.handle을 실제 계정으로 교체
 - [ ] 문구를 소리 내어 읽고 본인 말투로 다듬기 (2~3회)
 - [ ] 훅 1초 기준: 표지 첫 줄이 즉시 읽히는가
-- [ ] 폰트 품질을 올리려면 Pretendard 설치 권장 (미설치 시 Malgun Gothic 폴백)
+- [ ] 한글 글꼴은 **Noto Sans KR** 이다(`palette.mjs` `DEFAULT_FONTS`). 없으면 Malgun Gothic 으로 바뀌어 화면이 달라진다 — 설치돼 있는지 확인 (사본: `assets/fonts/NotoSansKR-VF.ttf`)
 
 ## 디자인 토큰
 

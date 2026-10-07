@@ -12,7 +12,7 @@ import { spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync, mkdirSync, rmSync, existsSync } from 'node:fs';
 import { resolve, dirname, join, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { tryWriteReelCaption, readPublishDate, drivePathFor } from './reel-caption.mjs';
+import { tryWriteReelCaption, readPublishDate, drivePathFor, captionSidecars } from './reel-caption.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const args = { dir: 'out/day-0', hold: 4.0, xfade: 0.5, out: null, bg: '0x0D1117', drive: null, rclone: 'rclone', hook: null, fps: 30, hookSpeed: 1.0, slug: null, manifest: null, pubdate: null };
@@ -241,7 +241,8 @@ if (args.drive) {
     process.exit(1);
   }
 
-  const toUpload = [out, ...(captionOut ? [captionOut] : [])];
+  const toUpload = [out, ...captionSidecars(captionOut)];   // 캡션 + (isAiGenerated 회차면) AI 라벨 안내
+
   for (const f of toUpload) {
     // copy(폴더로 복사, 원래 이름 유지)가 아니라 copyto(대상 파일명 지정)를 쓴다 — 이름을 바꿔 올리려면 필수.
     const dest = drivePathFor(args.drive, f, pubDate);

@@ -19,7 +19,7 @@
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MARKED_NUMBER, BLOCKING, normNumber, isDistinctive } from '../vault/claim-markers.mjs';
+import { MARKED_NUMBER, BLOCKING, normNumber, numCore, isDistinctive } from '../vault/claim-markers.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..', '..');
@@ -143,9 +143,14 @@ for (const d of copy) {
   for (const m of d.text.matchAll(COPY_NUM)) {
     const raw = m[0].trim();
     if (!raw || !/\d/.test(raw)) continue;
-    const key = normNumber(raw);
+    // ★ 2026-10-06 (사용자 「수정」): 대장에 **단위 없이** 적힌 변별력 있는 숫자는 원고 쪽 단위를 떼고도 본다.
+    //   📌 왜: 대장 `15,000[미검증]`(원문 `$5,000~$15,000`) 인데 원고 「15,000원 정도」가 통과했다 — 원고가 `15000원` 으로 잡혀서.
+    //   ⛔ 양쪽 단위를 다 떼면 안 된다 — 첫 시도에서 「1~2개」↔대장 「1~2%」 · 「3.1초」↔「3.1배」 가 막혔고 경고가 18 → 202 로 불었다.
+    //   ▶ 그래서 ① 그대로 대조 ② 안 맞으면 원고 단위를 뗀 값으로 **단위 없는 대장 항목**만 찾는다(대장 키가 단위를 갖고 있으면 numCore 값과 안 맞는다).
+    //     두 번째 대조는 변별력 있는 항목만 — 낮은 값까지 넓히면 경고가 불어 게이트가 무시된다.
+    let key = normNumber(raw), hit = marked.get(key);
+    if (!hit) { const k2 = numCore(raw), h2 = marked.get(k2); if (h2 && h2.distinctive) { key = k2; hit = h2; } }
     if (seen.has(key)) continue;
-    const hit = marked.get(key);
     if (!hit || !hit.blocking) continue;
     seen.add(key);
     (hit.distinctive ? hard : soft).push({ ...d, raw, hit });
