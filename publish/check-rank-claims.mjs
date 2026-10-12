@@ -156,10 +156,16 @@ if (existsSync(CARDNEWS) && !(ONLY && !ONLY.startsWith('post-'))) {
   }
 }
 
+// ✏️ 2026-10-13 — `--only` 면 ③~⑥(릴스 레시피·화면 텍스트·네이버·티스토리)은 **보지 않는다.**
+//   📌 왜: 이 넷은 `publish.mjs` 가 올리는 글이 아니다(릴스는 폰 업로드 · 블로그는 발행기 따로). 그런데 `--only` 를
+//   받아도 폴더 전체를 읽어서, 10/20 네이버 원고 한 줄(「7편 중 7편」)이 **10/12 21:00 t-99 · 10/13 07:00 AM 을 막았다.**
+//   위 「그 한 회차만 검사한다」(2026-08-28)를 ①②에만 적용하고 ③~⑥에 안 걸어 둔 구멍이었다. 전량 검사(인자 없이)는 그대로 넷 다 본다.
+const WHOLE = !ONLY;
+
 // ③ ★ 릴스 레시피 — 훅 배지·훅 문장은 **영상에 구워진다.**
 //    `check-numbers.mjs` 는 이 파일을 건너뛴다. 2026-08-24에 「릴스 10편」이 여기 숨어 있었다.
 const RECIPES = path.join(CARDNEWS, 'reels-recipes.json');
-if (existsSync(RECIPES)) {
+if (WHOLE && existsSync(RECIPES)) {
   try {
     const j = JSON.parse(readFileSync(RECIPES, 'utf8'));
     for (const r of (j.recipes || [])) {
@@ -177,7 +183,7 @@ if (existsSync(RECIPES)) {
 //    `out/` 이 .gitignore 로 통째 제외돼 있어 원본이 백업 없이 살고 있었기 때문이다.
 //    경로 규칙은 cardnews/lines-path.mjs 가 단일 출처다 — 소비자가 3곳이라 각자 박으면 갈린다.
 //    `_` 접두 스크래치 제외는 그 모듈이 한다(`_assemble-01` 등, 발행물 아님).
-const lineSlugs = listLineSlugs();
+const lineSlugs = WHOLE ? listLineSlugs() : [];
 // ⛔ 0건이면 이 절 전체가 조용히 통과한다 — 「검사했다」와 「볼 게 없었다」가 구별되지 않는다.
 //   레시피가 있는데 대본이 하나도 없으면 그건 정상이 아니라 경로가 어긋난 것이다.
 if (!lineSlugs.length && slugDate.size > 0) {   // ★ Map 이다 — Object.keys 는 항상 0 이라 가드가 안 걸린다
@@ -198,7 +204,7 @@ for (const slug of lineSlugs) {
 }
 
 // ⑤ 네이버·블로그 초안 (예약 발행분) — 파일명 앞 날짜로 판정
-for (const sub of ['drafts', 'images']) {
+for (const sub of (WHOLE ? ['drafts', 'images'] : [])) {
   const dir = path.join(NAVER, sub);
   if (!existsSync(dir)) continue;
   for (const f of readdirSync(dir)) {
@@ -211,7 +217,10 @@ for (const sub of ['drafts', 'images']) {
       //   거기에는 「「열 개 중」을 뺐습니다」처럼 **정정 기록**이 들어가서 그대로 읽으면 오탐이 된다.
       //   2026-08-24에 실제로 그 오탐이 났다 — 고친 사실을 적어둔 줄이 걸렸다.
       const raw = readFileSync(p, 'utf8');
-      const cut = raw.indexOf('여기부터 복사');
+      // ✏️ 2026-10-13 — 첫 줄 안내문에도 「여기부터 복사」 글자가 들어 있어 indexOf 가 그 줄을 먼저 잡았다 →
+      //   안내 블록이 통째로 검사됐다(10/20 원고의 0절 채우기 줄이 걸린 이유). 표지 줄(■■■ 여기부터 복사 ■■■)만 찾는다.
+      const mk = raw.match(/^■■■\s*여기부터 복사\s*■■■.*$/m);
+      const cut = mk ? mk.index : raw.indexOf('여기부터 복사');
       const body = cut === -1 ? raw : raw.slice(raw.indexOf('\n', cut) + 1);
       push(`naver/${sub}/${f}`, '네이버 원고', body);
     }
@@ -246,7 +255,7 @@ for (const sub of ['drafts', 'images']) {
 // ⚠️ 프론트매터는 **발행되지 않는 메타데이터**다(sources·공개금지 등). 네이버 초안의
 //   안내 블록과 같은 이유로 잘라낸다 — 거기 적힌 정정·출처 기록이 그대로 오탐이 된다.
 const TISTORY = path.join(ROOT, 'pipeline', 'blog', 'posts');
-if (existsSync(TISTORY)) {
+if (WHOLE && existsSync(TISTORY)) {
   for (const f of readdirSync(TISTORY)) {
     if (!f.endsWith('.md')) continue;
     const raw = readFileSync(path.join(TISTORY, f), 'utf8');
