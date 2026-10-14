@@ -107,6 +107,9 @@ for (const m of mediaList.json.data) {
     SNAP.push({
       ts: RUN_TS, surface: 'instagram', id: m.id, published: m.timestamp, caption: cap,
       type: `${m.media_type}/${m.media_product_type}`, reach: num('reach'), views: num('views'),
+      // ★ 2026-10-14 — likes·comments·shares·saved 도 같이 남긴다(릴스 세션 · insights-rank.mjs 의 「보내기/도달」 열).
+      //   그전 스냅샷엔 없다 → 그 회차는 열이 빈 게 정상이고, 0이 아니다. 미지원이면 undefined 라 JSON.stringify 가 키를 뺀다.
+      likes: num('likes'), comments: num('comments'), shares: num('shares'), saved: num('saved'),
     });
   }
   if (degraded) console.log(`  ⚠️ 확장 지표 미지원으로 기본 조합만 조회함 (요청했던 것: ${extra})`);

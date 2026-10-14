@@ -109,6 +109,29 @@ function endingRuns(text) {
   return runs;
 }
 
+// ── 2026-10-14 추가 — 타이포 지문 · 문장 길이 균질(릴스 세션 · 사용자 「instagram-agent-skill … 좋은점이 있으면 흡수해서 고도화」) ──
+// 원본: Jakeschincariol/instagram-agent-skill skills/ig-human/detect.py (MIT) 의 다섯 축 중 **언어와 무관한 둘**만 가져온다.
+//   FINGERPRINT — 폰 키보드가 안 만드는 글자: 보이지 않는 문자(U+200B 류·BOM·soft hyphen) · em 대시 — · 둥근 따옴표 ‘’“” · 말줄임 글자 … · 하드 스페이스.
+//   BURSTINESS — 문장 길이 변동계수(CV). 사람은 길이가 들쭉날쭉하고 모델은 고르다.
+//   나머지 셋(slop 어휘·축약형·인칭)은 영어 전용이라 안 옮긴다 — 우리는 no-ai-tell 스킬의 한국어 신호가 그 자리다.
+// 🔬 2026-10-14 실측(표면 665건): 보이지 않는 문자 0 · em 대시 59건 · 둥근 따옴표 0 · 말줄임 1 · 하드 스페이스 0.
+//    CV(문장 4개 이상 543건): 최소 0.06 · p10 0.26 · 중앙 0.37 · p75 0.45. 저쪽 「사람 0.55+」는 영어 기준이라 안 쓴다.
+// ▶ **둘 다 경고만.** 차단선은 종전대로 종결어미 4연속 하나뿐이다. ⛔ 지나간 회차(publishDate < 오늘)엔 안 찍는다 — 이미 나간 글 59건을 매일 다시 꾸짖어 봐야 check-ready 만 길어진다.
+//    em 대시는 볼트 문서의 강조 버릇이 발행 칸에 따라 들어온 것이다 — 10/04 `**` 사고(check-plain-text)와 같은 경로다.
+const FINGER = [
+  [/[\u200B-\u200F\u2060\uFEFF\u00AD\u180E\u061C\u{E0000}-\u{E007F}]/gu, '보이지 않는 문자'],
+  [/—/g, 'em 대시 —'], [/[‘’“”]/g, '둥근 따옴표'], [/…/g, '말줄임 글자 …'], [/[\u00A0\u202F\u2007]/g, '하드 스페이스'],
+];
+const fingerprint = (text) => FINGER.map(([re, name]) => { const n = (text.match(re) || []).length; return n ? `${name} ${n}` : null; }).filter(Boolean);
+const CV_WARN = 0.20, CV_MIN_SENTS = 5;   // p10 이 0.26 — 그 아래 꼬리(약 5%)만 경고. 실측 최저 5건이 0.06~0.16 이었다.
+const burstiness = (text) => {
+  const lens = sentencesOf(text).map((s) => [...s].length).filter((n) => n > 3);
+  if (lens.length < CV_MIN_SENTS) return null;
+  const mean = lens.reduce((x, y) => x + y, 0) / lens.length;
+  const sd = Math.sqrt(lens.reduce((x, y) => x + (y - mean) ** 2, 0) / lens.length);
+  return { cv: +(sd / mean).toFixed(2), n: lens.length };
+};
+
 // 숫자·날짜 개수 — **릴스 캡션·캐러셀에서만** 본다(위 ② 참조).
 const NUM = /(?<![\w가-힣])\d[\d,.]*\s*(?:%|퍼센트|배|건|명|회차|회|개|일|주|개월|월|년|시간|분|초|원|만원|억|천|백|K|k)?/g;
 const numCount = (text) => (stripDeco(text).match(NUM) || []).length;
@@ -170,6 +193,12 @@ for (const r of rows) {
     const where = `${r.surface} (${r.file})`;
     if (run.len >= RUN_BLOCK) blocked.push({ where, run });
     else warned.push({ where, why: `종결어미 「${run.ending}」 ${run.len}연속`, sents: run.sents });
+  }
+  if (!isPast(r.date)) {
+    const fp = fingerprint(r.text);
+    if (fp.length) warned.push({ where: `${r.surface} (${r.file})`, why: `타이포 지문: ${fp.join(' · ')} — 폰 키보드가 안 만드는 글자(detect.py 축)`, sents: [] });
+    const b = burstiness(r.text);
+    if (b && b.cv < CV_WARN) warned.push({ where: `${r.surface} (${r.file})`, why: `문장 길이가 고르다 CV ${b.cv} (문장 ${b.n}개 · 경고선 ${CV_WARN} · 실측 중앙 0.37)`, sents: [] });
   }
   if (NUM_SURFACES.has(r.surface) && numCount(r.text) === 0) {
     warned.push({ where: `${r.surface} (${r.file})`, why: '숫자·날짜 0개 — 0절 채우기 1항목 비었음', sents: [] });
