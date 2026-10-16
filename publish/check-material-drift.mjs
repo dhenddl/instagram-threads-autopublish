@@ -87,7 +87,13 @@ const declared = [];        // [{ manifest, id }]
 const dateOnly = [];        // 날짜만 맞고 선언이 없는 것
 for (const f of manifests) {
   let m;
-  try { m = JSON.parse(readFileSync(join(HERE, f), 'utf8')); } catch { continue; }
+  // ⛔ `--only` 로 받은 파일을 못 읽으면 막는다(2026-10-14 릴스 발견). 예전엔 삼키고
+  //    「자료 배포 회차가 아니다 ✅」를 찍었다 — 확장자 빠짐·경로 붙음·오타가 전부 통과였다.
+  //    발행 경로는 basename 을 넘겨 안전했고, 손으로 부를 때만 속았다.
+  try { m = JSON.parse(readFileSync(join(HERE, f), 'utf8')); } catch (e) {
+    if (only) { console.error(`⛔ ${only} — 매니페스트를 못 읽었다(${e.code ?? e.message}). publish/ 안의 파일 이름만 확장자까지 준다. 예: --only post-week14-wed.json`); process.exit(1); }
+    continue;
+  }
   if (m.material) { declared.push({ manifest: f, id: String(m.material) }); continue; }
   const d = m.publishDate;
   if (!d) continue;

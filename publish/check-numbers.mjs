@@ -68,13 +68,14 @@ const CARDNEWS = path.join(ROOT, 'pipeline', 'cardnews');
 
 // 규약을 **설명하는** 문서는 제외한다 — 예시로 적은 `<실측 도달값>[미검증]` 이 실제 표시로 잡힌다.
 const SKIP = new Set(['log.md', 'index.md', 'lint-report.md', '쓰면 안 되는 숫자.md']);
+const LOG_FILE = /^log(-\d{4}-\d{2})?\.md$/;   // 2026-10-16 log 월별 분할(R6) — 지난달 log-YYYY-MM.md 도 이력이라 뺀다
 
 function walk(dir) {
   const out = [];
   for (const e of readdirSync(dir)) {
     const p = path.join(dir, e);
     if (statSync(p).isDirectory()) out.push(...walk(p));
-    else if (e.endsWith('.md') && !SKIP.has(e)) out.push(p);
+    else if (e.endsWith('.md') && !SKIP.has(e) && !LOG_FILE.test(e)) out.push(p);
   }
   return out;
 }

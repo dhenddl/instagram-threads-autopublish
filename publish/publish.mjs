@@ -15,13 +15,17 @@
 //        ⚠️ 본계정 전용 · 짝 글 있는 회차만 단다(없는 회차가 A/B 대조군) · 게이트 check-blog-url.mjs
 //     "images": ["https://.../01.jpg", "https://.../02.jpg"],   // 공개 URL, JPEG만
 //     "alts": ["1번 대체텍스트", "2번 대체텍스트", ...],          // 선택. 이미지와 같은 순서. SEO+접근성
-//     "isAiGenerated": true,                                    // 선택. 인스타 캐러셀에 AI 라벨을 켠다(기본 false)
+//     "isAiGenerated": true,                                    // 선택. 인스타 캐러셀·API 릴스에 AI 라벨을 켠다(기본 false)
+//     "reel": { "video": "https://.../x.mp4", "cover": "https://.../x.jpg" },  // 선택(2026-10-15). 있으면 인스타는 캐러셀 대신 **릴스**로 올린다
+//                                                               //   음악 없는 모션 릴스만. shareToFeed(기본 true) · thumbOffset(ms, cover 없을 때)
+//     "topicTag": "AI 자동화",                                   // 선택. 스레드 본편 주제 태그(1~50자 · 마침표·& 금지). null 이면 안 붙인다
+//                                                               //   없으면 topic-tags.json 의 계정 기본값(파일이 없으면 안 붙인다)
 //     "targets": ["instagram", "threads"]
 //   }
 //
-// ⚠️ isAiGenerated는 **인스타 캐러셀 전용**이다.
-//   · 릴스에는 적용되지 않는다 — 우리 릴스는 API 발행이 아니라 **폰 앱 수동 업로드**이고,
-//     릴스 라벨은 앱의 `Add AI label` 토글로 켠다. 켠 결과는 `check-ai-label.mjs`로 검증한다.
+// ⚠️ isAiGenerated는 **인스타 캐러셀 · API 릴스(`reel`) 전용**이다.
+//   · 폰으로 올리는 릴스(음악 넣는 회차)에는 적용되지 않는다 — 앱의 `Add AI label` 토글로 켠다.
+//     켠 결과는 `check-ai-label.mjs`로 검증한다. ✏️ 2026-10-15: 음악 없는 모션 릴스는 `reel` 로 API 발행한다.
 //   · 스레드는 미적용 — 공식 문서가 확인된 건 Instagram 쪽뿐이라 검증 없이 넣지 않는다.
 //
 // 전제: .env에 IG_ACCESS_TOKEN / THREADS_ACCESS_TOKEN (장기 토큰).
@@ -87,8 +91,8 @@ async function api(method, url, params, retries = 3) {
 
 // 컨테이너 처리 완료 대기 (이미지 fetch·검증에 시간이 걸림)
 // 상태 필드가 인스타(status_code)와 스레드(status)에서 다르므로 field로 구분
-async function waitReady(base, containerId, token, label, field = 'status_code') {
-  for (let i = 0; i < 60; i++) {
+async function waitReady(base, containerId, token, label, field = 'status_code', tries = 60) {
+  for (let i = 0; i < tries; i++) {
     const r = await api('GET', `${base}/${containerId}`, { fields: field, access_token: token });
     const st = r[field];
     if (st === 'FINISHED') return;
@@ -119,7 +123,7 @@ const OUR_IG_SURFACE = 'FEED';
 
 // 반환: 게시물 객체(=게시됨) | null(=미발행 확인) | undefined(=확인 자체 실패)
 // windowMs — 오류 후 판정은 짧게(직후 몇 초), 발행 전 중복 검사는 길게(하루)
-async function findRecentPost(target, userId, token, text, windowMs = 15 * 60 * 1000) {
+async function findRecentPost(target, userId, token, text, windowMs = 15 * 60 * 1000, surface = OUR_IG_SURFACE) {
   const key = publishKey(text);
   if (!key) return undefined;                       // 비교 기준이 없으면 판정 불가
   const [base, edge, field, fields] = target === 'instagram'
@@ -134,7 +138,7 @@ async function findRecentPost(target, userId, token, text, windowMs = 15 * 60 * 
       if (!publishKey(p[field]).startsWith(key)) continue;
       // ⚠️ 표면이 **다른 것으로 확인될 때만** 거른다. 필드가 비면 거르지 않고 그대로 비교한다 —
       //    못 걸러서 중복 게시하는 쪽이 과잉 차단보다 나쁘다(위험 방향으로 열지 않는다).
-      if (target === 'instagram' && p.media_product_type && p.media_product_type !== OUR_IG_SURFACE) {
+      if (target === 'instagram' && p.media_product_type && p.media_product_type !== surface) {
         console.log(`  ℹ️ 같은 캡션이지만 표면이 다름 — 건너뜀: ${p.media_product_type} id=${p.id} (${p.timestamp})`);
         continue;
       }
@@ -151,8 +155,8 @@ async function findRecentPost(target, userId, token, text, windowMs = 15 * 60 * 
 // 07-22·08-04처럼 "오류가 났지만 실제로는 게시된" 뒤 사람이 --target으로 재실행하면
 // 사전 검사가 없으면 그대로 중복 게시된다. 하루 안에 같은 캡션이 있으면 발행을 멈춘다.
 // 의도적 재발행이 필요하면 --force 로 통과시킨다.
-async function assertNotAlreadyPublished(target, label, userId, token, text, force) {
-  const dup = await findRecentPost(target, userId, token, text, 24 * 60 * 60 * 1000);
+async function assertNotAlreadyPublished(target, label, userId, token, text, force, surface = OUR_IG_SURFACE) {
+  const dup = await findRecentPost(target, userId, token, text, 24 * 60 * 60 * 1000, surface);
   // ⚠️ 이 검사의 사각지대 — 초록불이 "안전"을 뜻하지 않는 지점들 (《몰라서 만들었다》 6장의 질문 적용):
   //   ① 조회가 실패하면(undefined) 중복을 못 보고 통과시킨다 = 위험 방향으로 열린다.
   //      막지는 않는다(조회 한 번 실패로 매일 예약 발행이 멈추면 그게 더 큰 손해) — 대신 반드시 소리를 낸다.
@@ -176,12 +180,12 @@ async function assertNotAlreadyPublished(target, label, userId, token, text, for
 }
 
 // 발행 호출을 감싸 "오류 → 실물 확인 → 판정" 순서를 강제한다.
-async function publishOrVerify({ target, label, userId, token, text, doPublish }) {
+async function publishOrVerify({ target, label, userId, token, text, doPublish, surface = OUR_IG_SURFACE }) {
   try {
     return { ...(await doPublish()), published: true };
   } catch (e) {
     console.error(`[${label}] 발행 호출 오류: ${e.message}`);
-    const found = await findRecentPost(target, userId, token, text);
+    const found = await findRecentPost(target, userId, token, text, undefined, surface);
     if (found) {
       console.log(`[${label}] ✅ 그런데 실물 확인 결과 게시됨 — id=${found.id} (${found.timestamp}) · 오류 응답은 거짓 실패`);
       console.log(`[${label}] ⛔ 재발행 금지 — 재실행하면 같은 글이 중복 게시된다`);
@@ -269,6 +273,58 @@ async function publishInstagram({ images, caption, alts, isAiGenerated }, token,
   return { mediaId: r.id, published: true, falseAlarm: r.falseAlarm };
 }
 
+// ---------- Instagram 릴스 (2026-10-15 신설 · 사용자 「추천대로 10/26 주 모션 릴스부터 API 발행 진행해」) ----------
+// 릴스를 폰으로 올려 온 이유는 **트렌드 음악**이었다. 모션 릴스는 말소리·효과음만 있고 음악을 안 넣는다
+// (사용자 2026-10-15) → API 로 올린다. Flow·음악 넣는 회차는 지금처럼 폰이다(매니페스트에 `reel` 을 안 둔다).
+// 공식 IG User Media(2026-10-15 열람): media_type=REELS · video_url · caption · share_to_feed · cover_url ·
+//   thumb_offset · is_ai_generated(「캐러셀 자식엔 불가」 — 릴스 본체엔 된다). 영상 H264 · AAC ≤48kHz · 23~60fps.
+// ★ 덤: AI 라벨이 코드로 켜진다 — 9/25 `reels-no-face` 는 사람이 앱에서 안 켜서 라벨 없이 나갔다.
+// ⚠️ API 릴스와 앱 릴스의 도달 차이는 안 쟀다 — 첫 회차는 같은 주 앱 업로드 회차와 +72h 대조.
+async function publishInstagramReel({ reel, caption, isAiGenerated }, token, dryRun, force) {
+  const { id: userId, username } = await api('GET', `${IG_BASE}/me`, { fields: 'id,username', access_token: token });
+  console.log(`[IG] 계정 확인: @${username} (${userId}) · 릴스 API 발행`);
+  if (!dryRun) await assertNotAlreadyPublished('instagram', 'IG', userId, token, caption, force, 'REELS');
+  const params = {
+    media_type: 'REELS', video_url: reel.video, caption,
+    share_to_feed: reel.shareToFeed === false ? 'false' : 'true', access_token: token,
+  };
+  if (reel.cover) params.cover_url = reel.cover;
+  else if (Number.isInteger(reel.thumbOffset)) params.thumb_offset = String(reel.thumbOffset);
+  if (isAiGenerated) params.is_ai_generated = 'true';
+  const { id: cid } = await api('POST', `${IG_BASE}/${userId}/media`, params);
+  console.log(`[IG] 릴스 컨테이너 생성: ${cid} — 영상 처리 대기(최대 5분)`);
+  await waitReady(IG_BASE, cid, token, 'IG 릴스', 'status_code', 150);
+  console.log(`[IG] 릴스 컨테이너 준비 완료: ${cid}${isAiGenerated ? ' (AI 라벨 요청함)' : ''}${reel.cover ? ' (표지 지정)' : ''}`);
+  if (dryRun) {
+    console.log('[IG] --dry-run: 발행 직전 정지. 컨테이너는 게시되지 않고 24시간 뒤 만료된다.');
+    return { creationId: cid, published: false };
+  }
+  const r = await publishOrVerify({
+    target: 'instagram', label: 'IG', userId, token, text: caption, surface: 'REELS',
+    doPublish: async () => {
+      const res = await api('POST', `${IG_BASE}/${userId}/media_publish`, { creation_id: cid, access_token: token });
+      console.log(`[IG] 🚀 릴스 발행 완료: media_id=${res.id}`);
+      if (res && res.config_issue != null) {
+        console.error(`[IG] ⚠️ CONFIG_ISSUE 발행은 됐지만 요청 일부가 떨어졌다: ${JSON.stringify(res.config_issue)}`);
+        console.error('[IG]    ▶ 앱에서 캡션·태그를 눈으로 확인한다. ⛔ 재발행하지 않는다.');
+      }
+      return { id: res.id };
+    },
+  });
+  // 실물 되읽기 — 표면이 릴스인지 · AI 라벨이 붙었는지(요청 ≠ 반영). 실패해도 던지지 않는다(이미 게시됨).
+  if (r.id) {
+    try {
+      const v = await api('GET', `${IG_BASE}/${r.id}`, { fields: 'media_product_type,is_ai_generated,permalink', access_token: token }, 0);
+      console.log(`[IG] ${v.media_product_type === 'REELS' ? '✅' : '⚠️'} 표면 ${v.media_product_type} · ${v.permalink ?? ''}`);
+      if (isAiGenerated) {
+        if (v.is_ai_generated === true) console.log('[IG] ✅ AI 라벨 실물 확인: is_ai_generated=true');
+        else console.error(`[IG] ⚠️ AI 라벨 요청했으나 실물은 is_ai_generated=${JSON.stringify(v.is_ai_generated)} — 앱에서 직접 켤 것`);
+      }
+    } catch (e) { console.error(`[IG] ⚠️ 릴스 실물 되읽기 실패(발행 자체는 완료됨): ${e.message}`); }
+  }
+  return { mediaId: r.id, published: true, falseAlarm: r.falseAlarm };
+}
+
 // ---------- Threads 셀프 답글 체인 ----------
 // 부모→답글1→답글2로 **연쇄**시킨다(전부 부모에 붙이면 형제 나열이 되고, 연쇄하면 시리즈로 렌더링됨).
 // 발행 직후 즉시 붙이는 게 중요하다 — 피드 노출이 시작될 때 이미 답글이 있어야 첫 시청자부터 유입된다.
@@ -338,7 +394,37 @@ async function publishThreadReplies(userId, token, replies, parentId, dryRun) {
 }
 
 // ---------- Threads (텍스트 전용 또는 이미지 캐러셀) ----------
-async function publishThreads({ images, text, textOnly, replies }, token, dryRun, force) {
+// ---------- Threads 주제 태그 (2026-10-14 신설 · 사용자 「주제 태그 진행해」) ----------
+// Meta 공식(threads/posts 「Topic tags」): topic_tag 1~50자 · 마침표(.)·앰퍼샌드(&) 금지 · 글 하나에 하나.
+// 발행 뒤 `fields=topic_tag` 로 되읽는다(retrieve-posts). 본편에만 붙이고 답글엔 안 붙인다.
+// 값: 매니페스트 topicTag 우선 → 없으면 topic-tags.json 의 계정 기본값 → 둘 다 없으면 안 붙인다.
+//   topicTag: null 은 「이 회차는 안 붙인다」. ⚠️ topic-tags.json 은 우리 계정 값이라 공개 자료에 넣지 않는다.
+function checkTopicTag(t, where) {
+  if (typeof t !== 'string' || !t.trim()) throw new Error(`${where} 주제 태그가 빈 값이다 (받은 값: ${JSON.stringify(t)})`);
+  if ([...t].length > 50) throw new Error(`${where} 주제 태그 50자 초과 (${[...t].length}자)`);
+  if (/[.&]/.test(t)) throw new Error(`${where} 주제 태그에 마침표·& 는 못 쓴다: "${t}"`);
+  return t;
+}
+// ✏️ 2026-10-15 — 글 성격(_유형 A~G)에 맞춘다(사용자: 「일상글인데 AI 자동화로 붙었어. 글 성격에 맞춰서」).
+//   계정 값이 문자열이면 그대로, { default, byType: { G: "날씨", … } } 이면 매니페스트 `_유형` 첫 글자로 고른다.
+//   byType 에서 null 이면 그 유형은 안 붙인다. 유형이 없거나 표에 없으면 default.
+function resolveTopicTag(manifest, account) {
+  if (manifest.topicTag === null) return null;
+  if (manifest.topicTag !== undefined) return checkTopicTag(manifest.topicTag, 'manifest.topicTag');
+  const p = join(HERE, 'topic-tags.json');
+  if (!existsSync(p)) return null;
+  const v = JSON.parse(readFileSync(p, 'utf8'))[account];
+  if (v === undefined || v === null) return null;
+  if (typeof v === 'string') return checkTopicTag(v, `topic-tags.json[${account}]`);
+  const type = String(manifest['_유형'] ?? '').trim().charAt(0).toUpperCase();
+  const byType = v.byType ?? {};
+  if (type && Object.prototype.hasOwnProperty.call(byType, type)) {
+    return byType[type] === null ? null : checkTopicTag(byType[type], `topic-tags.json[${account}].byType.${type}`);
+  }
+  return v.default === undefined || v.default === null ? null : checkTopicTag(v.default, `topic-tags.json[${account}].default`);
+}
+
+async function publishThreads({ images, text, textOnly, replies, topicTag }, token, dryRun, force) {
   const { id: userId, username } = await api('GET', `${TH_BASE}/me`, { fields: 'id,username', access_token: token });
   console.log(`[TH] 계정 확인: @${username} (${userId})`);
 
@@ -348,7 +434,7 @@ async function publishThreads({ images, text, textOnly, replies }, token, dryRun
   let creationId;
   if (textOnly) {
     // 텍스트 전용 포스트 (media_type=TEXT) — 스레드는 텍스트 우선 플랫폼
-    const { id } = await api('POST', `${TH_BASE}/${userId}/threads`, { media_type: 'TEXT', text, access_token: token });
+    const { id } = await api('POST', `${TH_BASE}/${userId}/threads`, { media_type: 'TEXT', text, ...(topicTag ? { topic_tag: topicTag } : {}), access_token: token });
     creationId = id;
     console.log(`[TH] 텍스트 컨테이너 생성: ${id}`);
   } else {
@@ -366,12 +452,12 @@ async function publishThreads({ images, text, textOnly, replies }, token, dryRun
     // 스레드는 자식이 FINISHED 되기 전에 묶으면 "하위 요소 무효" 오류 → 전부 완료 대기 (필드명 status)
     for (const [i, id] of children.entries()) await waitReady(TH_BASE, id, token, `TH 아이템 ${i + 1}`, 'status');
     const { id: carouselId } = await api('POST', `${TH_BASE}/${userId}/threads`, {
-      media_type: 'CAROUSEL', children: children.join(','), text, access_token: token,
+      media_type: 'CAROUSEL', children: children.join(','), text, ...(topicTag ? { topic_tag: topicTag } : {}), access_token: token,
     });
     creationId = carouselId;
   }
   await waitReady(TH_BASE, creationId, token, 'TH', 'status');
-  console.log(`[TH] 컨테이너 준비 완료: ${creationId}`);
+  console.log(`[TH] 컨테이너 준비 완료: ${creationId}${topicTag ? ` (주제 태그 「${topicTag}」 요청함)` : ''}`);
 
   if (dryRun) {
     console.log('[TH] --dry-run: 발행 직전 정지. 검수 후 재실행하세요.');
@@ -386,6 +472,15 @@ async function publishThreads({ images, text, textOnly, replies }, token, dryRun
       return { id };
     },
   });
+
+  // 주제 태그 실물 확인 — 「요청함」과 「붙었다」는 다르다(AI 라벨과 같은 규약). 실패해도 발행은 이미 끝났다.
+  if (topicTag && r.id) {
+    try {
+      const v = await api('GET', `${TH_BASE}/${r.id}`, { fields: 'topic_tag', access_token: token }, 0);
+      if (v.topic_tag === topicTag) console.log(`[TH] ✅ 주제 태그 실물 확인: 「${v.topic_tag}」`);
+      else console.error(`[TH] ⚠️ 주제 태그 요청 「${topicTag}」 · 실물 ${JSON.stringify(v.topic_tag ?? null)} — 앱에서 확인할 것`);
+    } catch (e) { console.error(`[TH] ⚠️ 주제 태그 되읽기 실패: ${e.message}`); }
+  }
 
   // 셀프 답글은 부모 발행이 확정된 뒤에만 붙인다(거짓 실패로 확인된 경우도 부모 id가 있으니 진행 가능).
   // 답글 실패가 본편 발행을 실패로 만들지 않도록 격리한다 — 본편이 나간 게 더 중요하다.
@@ -408,9 +503,18 @@ const manifest = JSON.parse(readFileSync(args.manifest, 'utf8'));
 const targets = args.target ? [args.target] : (manifest.targets ?? ['instagram']);
 
 // 이미지는 인스타 발행 또는 스레드 이미지 캐러셀에만 필요 — 스레드 텍스트 전용 발행은 이미지 없이도 가능
-const needsImages = targets.includes('instagram') || (targets.includes('threads') && manifest.threadsTextOnly !== true);
+const needsImages = (targets.includes('instagram') && !manifest.reel) || (targets.includes('threads') && manifest.threadsTextOnly !== true);
 if (needsImages && !manifest.images?.length) throw new Error('manifest.images가 비어 있음 (인스타 또는 이미지 캐러셀 스레드 발행엔 이미지 필수)');
-if (manifest.images?.length > 10 && targets.includes('instagram')) throw new Error('인스타 캐러셀은 최대 10장');
+if (manifest.images?.length > 10 && targets.includes('instagram') && !manifest.reel) throw new Error('인스타 캐러셀은 최대 10장');
+// 릴스 API 발행(2026-10-15) — `reel: { video, cover?, shareToFeed?, thumbOffset? }`. 공개 https 주소여야 한다(인스타가 cURL 로 받아 간다).
+if (manifest.reel !== undefined) {
+  const rl = manifest.reel;
+  if (!rl || typeof rl !== 'object') throw new Error('reel 은 { video, cover?, shareToFeed?, thumbOffset? } 객체여야 함');
+  if (typeof rl.video !== 'string' || !/^https:\/\/.+\.mp4(\?|$)/i.test(rl.video)) throw new Error(`reel.video 는 공개 https .mp4 주소여야 함 (받은 값: ${JSON.stringify(rl.video)})`);
+  if (rl.cover !== undefined && (typeof rl.cover !== 'string' || !/^https:\/\/.+\.jpe?g(\?|$)/i.test(rl.cover))) throw new Error(`reel.cover 는 공개 https .jpg 주소여야 함 (받은 값: ${JSON.stringify(rl.cover)})`);
+  if (manifest.images?.length && targets.includes('instagram')) throw new Error('reel 과 images 를 같이 두면 인스타에 무엇을 올릴지 모호하다 — 하나만');
+  if (!manifest.caption) throw new Error('reel 회차는 caption 이 있어야 한다');
+}
 if (manifest.images?.some((u) => !/^https:\/\//.test(u))) throw new Error('이미지는 공개 https URL이어야 함');
 
 // AI 라벨 플래그 검증 — 조용히 무시되는 게 최악이다.
@@ -628,10 +732,14 @@ for (const target of targets) {
       const acc = String(args.account ?? manifest.account ?? 1);
       if (acc === '2') throw new Error('account=2 는 스레드 전용이다 — instagram 타깃을 쓸 수 없다');
       if (!env.IG_ACCESS_TOKEN) throw new Error('.env에 IG_ACCESS_TOKEN 없음');
-      r = await publishInstagram({
-        images: manifest.images, caption: manifest.caption ?? '', alts: manifest.alts,
-        isAiGenerated: manifest.isAiGenerated === true,
-      }, env.IG_ACCESS_TOKEN, args.dryRun, args.force);
+      r = manifest.reel
+        ? await publishInstagramReel({
+          reel: manifest.reel, caption: manifest.caption ?? '', isAiGenerated: manifest.isAiGenerated === true,
+        }, env.IG_ACCESS_TOKEN, args.dryRun, args.force)
+        : await publishInstagram({
+          images: manifest.images, caption: manifest.caption ?? '', alts: manifest.alts,
+          isAiGenerated: manifest.isAiGenerated === true,
+        }, env.IG_ACCESS_TOKEN, args.dryRun, args.force);
     } else if (target === 'threads') {
       const { key, token, account } = resolveThreadsToken(env, manifest, args.account);
       if (account !== '1') console.log(`[TH] ⚠️ 계정 ${account} 로 발행한다 (${key})`);
@@ -639,6 +747,7 @@ for (const target of targets) {
       r = await publishThreads({
         images: (manifest.images ?? []).slice(0, 20), text,
         textOnly: manifest.threadsTextOnly === true, replies: withBlogReply(manifest, account),
+        topicTag: resolveTopicTag(manifest, account),
       }, token, args.dryRun, args.force);
     } else {
       throw new Error(`알 수 없는 target: ${target}`);
